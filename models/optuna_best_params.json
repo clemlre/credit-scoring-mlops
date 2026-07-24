@@ -1,0 +1,21 @@
+{
+  "best_params": {
+    "learning_rate": 0.030806013665461505,
+    "num_leaves": 96,
+    "max_depth": 8,
+    "min_child_weight": 45.31577806919941,
+    "min_child_samples": 94,
+    "subsample": 0.7490569607715728,
+    "colsample_bytree": 0.7876911950002604,
+    "reg_alpha": 1.093736011567689,
+    "reg_lambda": 0.010429232923631,
+    "min_split_gain": 0.06746120803844996
+  },
+  "best_iteration": 867,
+  "optimal_threshold": 0.1,
+  "business_cost_optimal_threshold": 150877,
+  "business_cost_threshold_0.5": 236407,
+  "auc_oof": 0.7888684848958594,
+  "n_trials": 30,
+  "optuna_best_cv_cost": 8565.666666666666
+}
