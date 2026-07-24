@@ -1,0 +1,53 @@
+# --- Environnements Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+
+# --- Données Home Credit (Kaggle) ---
+# ~2,6 Go de CSV bruts : jamais dans un dépôt public (poids + licence Kaggle).
+# Voir data/README.md pour les récupérer.
+data/*
+!data/README.md
+
+# Dataset de features agrégées (~280 Mo), reproductible via src/prepare_data.py
+*.parquet
+
+# --- Tracking MLflow (hérité de la Partie 1) ---
+mlruns/
+mlruns.db
+mlartifacts/
+output/
+
+# --- Artefacts de modèle sérialisés ---
+# On versionne les *paramètres* du modèle (models/*.json, models/*.csv),
+# pas les binaires : ils sont reconstruits par src/. Décision à revoir à
+# l'étape 2 selon la façon dont le modèle entre dans l'image Docker.
+models/*.pkl
+models/*.joblib
+models/*.onnx
+models/*.txt
+
+# --- Données de production / monitoring (étape 3) ---
+monitoring/logs/
+*.log
+
+# --- Secrets : jamais en clair, même dans un dépôt privé ---
+.env
+.env.*
+*.pem
+*.key
+secrets/
+
+# --- OS / éditeurs ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

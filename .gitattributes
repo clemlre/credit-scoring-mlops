@@ -1,0 +1,17 @@
+# Normalisation des fins de ligne : LF dans le dépôt, quelle que soit la machine.
+# Sans ça, un script shell écrit sous Windows (CRLF) casse dans l'image Docker Linux.
+* text=auto eol=lf
+
+# Fichiers qui doivent rester en LF même côté poste de travail.
+*.sh   text eol=lf
+Dockerfile text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Binaires : pas de conversion, pas de diff textuel.
+*.png  binary
+*.jpg  binary
+*.pkl  binary
+*.joblib binary
+*.onnx binary
+*.parquet binary
