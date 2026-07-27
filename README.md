@@ -45,7 +45,7 @@ de ~700 features agrégées sur son historique. La décision d'octroi se prend a
 Prérequis : **Python 3.11** et [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone <url-du-depot>
+git clone https://github.com/clemlre/credit-scoring-mlops.git
 cd credit-scoring-mlops
 
 uv sync                          # coeur d'inférence + outils de dev (uv inclut le groupe `dev` par défaut)
