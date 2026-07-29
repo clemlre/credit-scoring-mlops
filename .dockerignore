@@ -1,0 +1,50 @@
+# Ce qui ne doit jamais entrer dans le contexte de build.
+#
+# Sans ce fichier, Docker envoie tout le répertoire au démon avant même de lire le
+# Dockerfile : les données Kaggle (2,6 Go) et le venv local partiraient à chaque
+# build, pour finir ignorés. Le contexte doit rester de l'ordre du méga-octet.
+
+# Environnements et caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Données et artefacts d'entraînement
+data/
+output/
+mlruns/
+mlruns.db
+mlartifacts/
+*.parquet
+
+# Code non déployé : il n'est ni copié par le Dockerfile, ni utile au build
+notebooks/
+tests/
+docs/
+monitoring/
+src/
+scripts/
+
+# Modèles au format non déployé (seul credit_default_lgbm.txt part dans l'image)
+models/*.pkl
+models/*.joblib
+models/*.onnx
+
+# Git et CI
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# Documentation et divers
+*.md
+!README.md
+.vscode/
+.idea/
+.env
+.env.*

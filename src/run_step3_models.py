@@ -9,11 +9,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-import training
-
 import lightgbm as lgb
 from lightgbm import LGBMClassifier
 from xgboost import XGBClassifier
+
+import training
 
 training.setup_mlflow()
 X, y = training.load_training_data()

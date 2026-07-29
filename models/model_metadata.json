@@ -1,0 +1,35 @@
+{
+  "model_name": "credit-default-lgbm",
+  "model_version": "1",
+  "source_run_id": "3c64b1734f52401f93ae55ae83d5b2e7",
+  "exported_at": "2026-07-29T10:44:48+00:00",
+  "decision_threshold": 0.1,
+  "threshold_rationale": "Seuil minimisant le coût métier 10*FN + 1*FP, balayé en out-of-fold. Un mauvais client accepté coûte 10 fois un bon client refusé.",
+  "n_features": 779,
+  "n_trees": 867,
+  "metrics": {
+    "auc_oof": 0.7888684848958594,
+    "business_cost_optimal_threshold": 150877.0,
+    "business_cost_threshold_0.5": 236407.0,
+    "optimal_threshold": 0.1,
+    "optuna_best_cv_cost": 8565.666666666666
+  },
+  "hyperparameters": {
+    "learning_rate": "0.030806013665461505",
+    "num_leaves": "96",
+    "max_depth": "8",
+    "min_child_weight": "45.31577806919941",
+    "min_child_samples": "94",
+    "subsample": "0.7490569607715728",
+    "colsample_bytree": "0.7876911950002604",
+    "reg_alpha": "1.093736011567689",
+    "reg_lambda": "0.010429232923631",
+    "min_split_gain": "0.06746120803844996",
+    "n_estimators": "867",
+    "threshold": "0.1"
+  },
+  "training_environment": {
+    "lightgbm": "4.6.0",
+    "python": "3.11.1"
+  }
+}

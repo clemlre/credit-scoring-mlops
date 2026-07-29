@@ -6,15 +6,21 @@ readme = "README.md"
 requires-python = ">=3.11,<3.12"
 
 # Coeur d'inférence : le strict nécessaire pour CHARGER le modèle et prédire.
-# C'est ce bloc qui partira dans l'image Docker — d'où sa maigreur volontaire.
-# Versions épinglées à l'identique de la Partie 1 : un modèle sérialisé se recharge
-# avec les mêmes versions de lightgbm/scikit-learn/numpy, sinon avertissements ou casse.
+# C'est ce bloc, et lui seul, qui part dans l'image Docker.
+#
+# Il ne contient volontairement ni scikit-learn, ni pandas, ni pyarrow : l'API
+# charge le modèle au format texte natif LightGBM et lui passe une matrice numpy.
+# Elle n'importe donc que `lightgbm` et `numpy` (vérifiable par grep sur api/).
+# Les embarquer « au cas où » ajoutait ~300 Mo à l'image pour du code jamais exécuté.
+#
+# lightgbm reste épinglé à la version de la Partie 1 : c'est elle qui a produit
+# l'artefact, et une version majeure différente pourrait interpréter le fichier
+# autrement.
 dependencies = [
     "lightgbm==4.6.0",
-    "scikit-learn==1.8.0",
-    "pandas==2.3.3",
     "numpy<2.3",
-    "pyarrow==23.0.1",
+    "fastapi==0.139.2",
+    "uvicorn[standard]==0.51.0",
 ]
 
 # Dépendances hors production, installées à la demande (`uv sync --group <nom>`).
@@ -22,6 +28,11 @@ dependencies = [
 [dependency-groups]
 # Reproduire l'entraînement de la Partie 1 et exporter un modèle déployable.
 training = [
+    # Déplacés hors du cœur d'inférence : utilisés par src/ et les notebooks
+    # (préparation des données, entraînement), jamais par l'API.
+    "scikit-learn==1.8.0",
+    "pandas==2.3.3",
+    "pyarrow==23.0.1",
     "mlflow==3.12.0",
     "optuna==4.8.0",
     "shap==0.51.0",
@@ -34,7 +45,12 @@ training = [
     "ipykernel==7.2.0",
 ]
 # Outillage de dev : non épinglé, les versions exactes sont figées par uv.lock.
+# pandas/pyarrow y figurent pour les tests de fidélité sur données réelles, qui
+# relisent le parquet de la Partie 1 ; ils n'entrent pas dans l'image.
 dev = [
+    "httpx==0.28.1",
+    "pandas==2.3.3",
+    "pyarrow==23.0.1",
     "pytest",
     "pytest-cov",
     "ruff",
@@ -57,6 +73,18 @@ testpaths = ["tests"]
 # Le projet n'est pas packagé (`package = false`) : on rend la racine importable
 # pour que `from api... import ...` fonctionne dans les tests sans bricolage de sys.path.
 pythonpath = ["."]
+
+[tool.coverage.run]
+# On ne mesure que le code servi en production. Les scripts d'entraînement de la
+# Partie 1 (src/) ne sont pas déployés : les inclure diluerait le taux et masquerait
+# une baisse de couverture sur l'API.
+source = ["api"]
+
+[tool.coverage.report]
+show_missing = true
+# Plancher vérifié en CI. La suite est à 100 % ; 95 laisse la marge d'un ajout
+# ponctuel sans bloquer, mais interdit une dérive silencieuse.
+fail_under = 95
 
 [tool.ruff]
 line-length = 100
