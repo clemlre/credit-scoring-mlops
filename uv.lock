@@ -398,15 +398,14 @@ dependencies = [
     { name = "fastapi", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "lightgbm", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "numpy", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-    { name = "pandas", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-    { name = "pyarrow", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-    { name = "scikit-learn", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "uvicorn", extra = ["standard"], marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "httpx", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "pandas", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "pyarrow", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "pytest", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "pytest-cov", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "ruff", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
@@ -419,6 +418,9 @@ training = [
     { name = "mlflow", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "numba", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "optuna", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "pandas", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "pyarrow", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "scikit-learn", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "seaborn", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "shap", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "xgboost", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
@@ -426,18 +428,17 @@ training = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.139.2" },
+    { name = "fastapi", specifier = "==0.139.2" },
     { name = "lightgbm", specifier = "==4.6.0" },
     { name = "numpy", specifier = "<2.3" },
-    { name = "pandas", specifier = "==2.3.3" },
-    { name = "pyarrow", specifier = "==23.0.1" },
-    { name = "scikit-learn", specifier = "==1.8.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.51.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = "==0.51.0" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "httpx", specifier = "==0.28.1" },
+    { name = "pandas", specifier = "==2.3.3" },
+    { name = "pyarrow", specifier = "==23.0.1" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
@@ -450,6 +451,9 @@ training = [
     { name = "mlflow", specifier = "==3.12.0" },
     { name = "numba", specifier = ">=0.60" },
     { name = "optuna", specifier = "==4.8.0" },
+    { name = "pandas", specifier = "==2.3.3" },
+    { name = "pyarrow", specifier = "==23.0.1" },
+    { name = "scikit-learn", specifier = "==1.8.0" },
     { name = "seaborn", specifier = "==0.13.2" },
     { name = "shap", specifier = "==0.51.0" },
     { name = "xgboost", specifier = "==3.2.0" },
