@@ -159,15 +159,41 @@ jobs:
             echo "::notice::Déploiement ignoré — définissez le secret HF_TOKEN et la variable HF_SPACE pour l'activer."
           fi
 
+      - name: Préparer la configuration du Space
+        if: steps.verif.outputs.configure == 'true'
+        # Hugging Face lit la configuration du Space dans un en-tête YAML placé en tête
+        # du README. On le génère ici plutôt que de le committer : le README du dépôt
+        # GitHub reste lisible, et la configuration de déploiement reste au bon endroit,
+        # c'est-à-dire dans le pipeline. `app_port` doit correspondre au port exposé par
+        # le Dockerfile, sinon le Space se construit puis répond « no healthy upstream ».
+        run: |
+          {
+            echo "---"
+            echo "title: API de scoring de credit"
+            echo "emoji: 💳"
+            echo "colorFrom: blue"
+            echo "colorTo: indigo"
+            echo "sdk: docker"
+            echo "app_port: 8000"
+            echo "pinned: false"
+            echo "---"
+            echo
+            cat README.md
+          } > README.space.md
+          mv README.space.md README.md
+
       - name: Déployer sur Hugging Face Spaces
         if: steps.verif.outputs.configure == 'true'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_SPACE: ${{ vars.HF_SPACE }}
         run: |
-          git config --global user.email "ci@example.com"
-          git config --global user.name "CI"
-          # Le jeton passe par l'URL distante, jamais par un fichier du dépôt.
+          git config user.email "ci@users.noreply.github.com"
+          git config user.name "CI"
+          git add README.md
+          git commit -m "chore: configuration du Space"
+          # Le jeton passe par l'URL distante, jamais par un fichier du dépôt, et
+          # n'apparaît pas dans les journaux (GitHub masque la valeur du secret).
           git remote add space "https://oauth2:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}"
           git push --force space HEAD:main
 
@@ -176,6 +202,9 @@ jobs:
         env:
           HF_SPACE: ${{ vars.HF_SPACE }}
         run: |
-          # Un déploiement n'est terminé que quand le service répond.
+          # Un déploiement n'est terminé que quand le service répond. Le Space doit
+          # d'abord reconstruire son image, ce qui prend quelques minutes : le test de
+          # fumée réessaie pendant une minute, on lui laisse d'abord le temps de bâtir.
+          sleep 120
           espace=$(echo "$HF_SPACE" | tr '/' '-' | tr '[:upper:]' '[:lower:]')
           python scripts/smoke_test.py "https://${espace}.hf.space"
