@@ -11,7 +11,7 @@ latence, optimisation).
 ## En deux lignes
 
 Un `LGBMClassifier` prédit la probabilité de défaut d'un demandeur de crédit à partir
-de ~700 features agrégées sur son historique. La décision d'octroi se prend au **seuil
+de 779 features agrégées sur son historique. La décision d'octroi se prend au **seuil
 0,10** (et non 0,5), parce que la métrique métier pénalise un mauvais client accepté
 **10 fois** plus qu'un bon client refusé.
 
