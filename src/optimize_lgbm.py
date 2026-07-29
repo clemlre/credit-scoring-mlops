@@ -1,4 +1,4 @@
-"""Étape 4 — optimisation des hyperparamètres de LightGBM avec Optuna.
+r"""Étape 4 — optimisation des hyperparamètres de LightGBM avec Optuna.
 
 Objectif optimisé : le coût métier (10*FN + FP) validé en StratifiedKFold, au
 seuil choisi pour chaque fold. Median pruning pour couper les essais faibles.

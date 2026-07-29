@@ -8,7 +8,7 @@ pénalité L2 (`alpha`) + early stopping sur une fraction de validation interne.
 On sous-échantillonne le train (rapide, et suffisant pour comparer) et on évalue
 sur un hold-out stratifié. Chaque essai est logué dans MLflow.
 
-Lancement : .\.venv\Scripts\python.exe src\run_mlp_activations.py [n_subsample]
+Lancement : .\\.venv\\Scripts\\python.exe src\run_mlp_activations.py [n_subsample]
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import mlflow
-import numpy as np
 import pandas as pd
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import recall_score, roc_auc_score
@@ -79,7 +78,7 @@ def main(n_subsample: int = 60000) -> None:
 
             mlflow.log_params({"model": "MLPClassifier", "activation": act,
                                "hidden_layer_sizes": "(64, 32)", "alpha": 1e-3,
-                               "early_stopping": True, "n_subsample": int(len(X))})
+                               "early_stopping": True, "n_subsample": len(X)})
             mlflow.log_metrics({"auc": auc, "recall_minority": rec, "business_cost": cost,
                                 "n_iter": n_iter, "best_val_score": best_val})
             mlflow.set_tags({"step": "2", "family": "neural-net", "activation": act})
