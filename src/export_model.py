@@ -33,7 +33,7 @@ import argparse
 import json
 import os
 import platform
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import lightgbm as lgb
@@ -152,7 +152,7 @@ def main() -> None:
         "model_name": REGISTERED_MODEL,
         "model_version": str(model_version.version),
         "source_run_id": model_version.run_id,
-        "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "exported_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "decision_threshold": threshold,
         "threshold_rationale": (
             "Seuil minimisant le coût métier 10*FN + 1*FP, balayé en out-of-fold. "
