@@ -27,13 +27,21 @@ mlartifacts/
 output/
 
 # --- Artefacts de modèle sérialisés ---
-# On versionne les *paramètres* du modèle (models/*.json, models/*.csv),
-# pas les binaires : ils sont reconstruits par src/. Décision à revoir à
-# l'étape 2 selon la façon dont le modèle entre dans l'image Docker.
+# Les formats qui embarquent du code exécutable (pickle) restent hors du dépôt :
+# on ne recharge pas un pickle venu d'un dépôt public, et il exige les versions
+# exactes de scikit-learn/LightGBM du jour de l'entraînement.
 models/*.pkl
 models/*.joblib
 models/*.onnx
+
+# Exception assumée : l'artefact déployable au format texte natif LightGBM (5,4 Mo).
+# Il EST versionné, parce que l'API, les tests et l'image Docker doivent pouvoir
+# fonctionner sans accès au registre MLflow de la Partie 1 (qui vit hors dépôt).
+# Il est reproductible à l'identique via `python src/export_model.py`.
+# En contexte industriel, cet artefact vivrait dans un registre de modèles ou un
+# artifact store, pas dans Git — c'est un compromis de projet, pas un idéal.
 models/*.txt
+!models/credit_default_lgbm.txt
 
 # --- Données de production / monitoring (étape 3) ---
 monitoring/logs/
