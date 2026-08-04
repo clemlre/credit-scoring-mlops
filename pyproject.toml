@@ -15,6 +15,8 @@ dependencies = [
     "pandas==2.3.3",
     "numpy<2.3",
     "pyarrow==23.0.1",
+    "fastapi==0.139.2",
+    "uvicorn[standard]==0.51.0",
 ]
 
 # Dépendances hors production, installées à la demande (`uv sync --group <nom>`).
@@ -35,6 +37,7 @@ training = [
 ]
 # Outillage de dev : non épinglé, les versions exactes sont figées par uv.lock.
 dev = [
+    "httpx==0.28.1",
     "pytest",
     "pytest-cov",
     "ruff",
@@ -57,6 +60,18 @@ testpaths = ["tests"]
 # Le projet n'est pas packagé (`package = false`) : on rend la racine importable
 # pour que `from api... import ...` fonctionne dans les tests sans bricolage de sys.path.
 pythonpath = ["."]
+
+[tool.coverage.run]
+# On ne mesure que le code servi en production. Les scripts d'entraînement de la
+# Partie 1 (src/) ne sont pas déployés : les inclure diluerait le taux et masquerait
+# une baisse de couverture sur l'API.
+source = ["api"]
+
+[tool.coverage.report]
+show_missing = true
+# Plancher vérifié en CI. La suite est à 100 % ; 95 laisse la marge d'un ajout
+# ponctuel sans bloquer, mais interdit une dérive silencieuse.
+fail_under = 95
 
 [tool.ruff]
 line-length = 100
