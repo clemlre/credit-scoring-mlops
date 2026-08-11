@@ -193,6 +193,16 @@ et manuellement.
 Aucun identifiant n'est écrit dans le dépôt : la publication d'image utilise le
 `GITHUB_TOKEN` éphémère, le déploiement un secret de dépôt.
 
+La procédure de configuration du déploiement est décrite dans
+[`docs/deploiement.md`](docs/deploiement.md).
+
+## Pourquoi ces choix techniques
+
+FastAPI plutôt que Gradio, format texte natif plutôt que pickle, bornes de validation
+mesurées plutôt que décrétées : chaque décision est justifiée — avec ce qui a été écarté
+et à quelle condition elle deviendrait mauvaise — dans
+[`docs/choix-techniques.md`](docs/choix-techniques.md).
+
 ## Interpréter le monitoring
 
 > _Section à compléter à l'étape 3._
