@@ -24,7 +24,7 @@ Placer les 7 tables utilisées par le pipeline de features à la racine de `data
 Puis :
 
 ```bash
-uv run python src/prepare_data.py          # ~700 features -> output/feature_dataset.parquet
+uv run python src/prepare_data.py          # 779 features -> output/feature_dataset.parquet
 uv run python src/prepare_data.py --debug  # 10 000 lignes par table, pour tester vite
 ```
 

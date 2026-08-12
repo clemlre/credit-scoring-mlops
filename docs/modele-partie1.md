@@ -16,13 +16,16 @@ Cible binaire `TARGET` : 1 = le client a fait défaut. Classes très déséquili
 |---|---|
 | Tables sources | 7 CSV (`application_train/test`, `bureau`, `bureau_balance`, `previous_application`, `POS_CASH_balance`, `installments_payments`, `credit_card_balance`) |
 | Pipeline | `src/prepare_data.py` — adapté du kernel Kaggle *jsaguiar* |
-| Sortie | `output/feature_dataset.parquet`, **~700 features** agrégées, clé `SK_ID_CURR` |
+| Sortie | `output/feature_dataset.parquet`, **779 features** agrégées, clé `SK_ID_CURR` |
 | Encodage | one-hot des catégorielles + ratios métier (`PAYMENT_RATE`, `INCOME_CREDIT_PERC`, …) |
 
 ⚠️ Point structurant pour l'API : **le modèle ne consomme pas les données brutes d'un
-client**, mais un vecteur de ~700 features agrégées sur son historique multi-tables.
-Le contrat d'entrée de l'API est donc une décision de conception à part entière
-(étape 2).
+client**, mais un vecteur de 779 features agrégées sur son historique multi-tables.
+
+Ce contrat a été tranché à l'étape 2 : l'API accepte un sous-ensemble libre de ces
+779 features, réparties en **245 features « dossier de demande »** (renseignées par le
+demandeur) et **534 agrégats d'historique de crédit** (calculés sur ses crédits passés,
+donc absents pour un primo-emprunteur). Voir le README, section « Que faut-il envoyer ».
 
 ## Modèle
 
