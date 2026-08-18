@@ -144,6 +144,27 @@ class BatchPredictionResponse(BaseModel):
     predictions: list[PredictionResponse]
 
 
+class PredictionLogStatus(BaseModel):
+    """État du journal des prédictions, exposé pour la supervision."""
+
+    stdout: bool = Field(
+        ..., description="Le flux JSON des prédictions sur la sortie standard est actif."
+    )
+    database: Literal["ready", "disabled", "unavailable"] = Field(
+        ...,
+        description=(
+            "État du stockage PostgreSQL. `disabled` : aucune base configurée "
+            "(`DATABASE_URL` absent), ce qui est un mode de fonctionnement normal. "
+            "`unavailable` : une base est configurée mais la dernière écriture a "
+            "échoué — les prédictions restent servies et tracées sur la sortie "
+            "standard, seul le monitoring est dégradé."
+        ),
+    )
+    last_error: str | None = Field(
+        None, description="Cause du dernier échec d'écriture, si le stockage est dégradé."
+    )
+
+
 class HealthResponse(BaseModel):
     """État du service, destiné aux sondes de disponibilité."""
 
@@ -152,6 +173,14 @@ class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     model_loaded: bool
     model_version: str | None = None
+    prediction_log: PredictionLogStatus | None = Field(
+        None,
+        description=(
+            "État de la journalisation des prédictions. Volontairement **sans effet "
+            "sur le code de statut** : une base de monitoring en panne ne doit pas "
+            "faire retirer l'API du trafic, son métier reste de rendre des scores."
+        ),
+    )
 
 
 class ModelInfoResponse(BaseModel):
