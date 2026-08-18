@@ -16,11 +16,18 @@ requires-python = ">=3.11,<3.12"
 # lightgbm reste épinglé à la version de la Partie 1 : c'est elle qui a produit
 # l'artefact, et une version majeure différente pourrait interpréter le fichier
 # autrement.
+#
+# psycopg entre bien dans le cœur : l'API journalise ses prédictions en PostgreSQL,
+# donc l'image en a besoin. L'extra `binary` évite de compiler libpq au build (pas
+# de gcc ni de libpq-dev dans l'image), `pool` fournit le pool de connexions ouvert
+# une seule fois au démarrage. Coût : ~5 Mo, pour la seule dépendance de l'API qui
+# ne serve pas l'inférence.
 dependencies = [
     "lightgbm==4.6.0",
     "numpy<2.3",
     "fastapi==0.139.2",
     "uvicorn[standard]==0.51.0",
+    "psycopg[binary,pool]==3.2.12",
 ]
 
 # Dépendances hors production, installées à la demande (`uv sync --group <nom>`).
