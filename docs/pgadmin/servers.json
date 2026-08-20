@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Monitoring - scoring de credit",
+      "Group": "Pret a Depenser",
+      "Host": "db",
+      "Port": 5432,
+      "MaintenanceDB": "monitoring",
+      "Username": "scoring",
+      "SSLMode": "prefer",
+      "Comment": "Base de production du journal des predictions. Mot de passe : voir .env (developpement)."
+    }
+  }
+}
