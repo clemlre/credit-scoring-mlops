@@ -1,0 +1,58 @@
+# Pile locale : API + PostgreSQL (stockage des prédictions).
+#
+#   docker compose up -d --build
+#   docker compose --profile outils up -d   # ajoute pgAdmin sur :5050
+#
+# Les mots de passe ci-dessous sont des valeurs de développement, surchargeables
+# par un fichier .env non versionné.
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: scoring-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-scoring}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scoring_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-monitoring}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-scoring} -d ${POSTGRES_DB:-monitoring}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    container_name: scoring-api
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-scoring}:${POSTGRES_PASSWORD:-scoring_dev}@db:5432/${POSTGRES_DB:-monitoring}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: scoring-pgadmin
+    profiles: ["outils"]
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@local.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin_dev}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
+    volumes:
+      - ./docs/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    ports:
+      - "5050:80"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

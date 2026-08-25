@@ -35,6 +35,10 @@ models/*.pkl
 models/*.joblib
 models/*.onnx
 
+# Pile de developpement local : jamais dans le contexte de build de l image
+docker-compose.yml
+docker-compose.*.yml
+
 # Git et CI
 .git/
 .github/
