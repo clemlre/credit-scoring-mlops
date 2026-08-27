@@ -62,6 +62,11 @@ dev = [
     "pytest-cov",
     "ruff",
 ]
+# Analyse du data drift (étape 3). Hors du cœur d'inférence : l'API n'importe jamais
+# Evidently, et l'image Docker n'en contient pas une ligne.
+monitoring = [
+    "evidently==0.7.21",
+]
 
 [tool.uv]
 package = false
