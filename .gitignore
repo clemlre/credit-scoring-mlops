@@ -50,6 +50,9 @@ monitoring/logs/
 # --- Secrets : jamais en clair, même dans un dépôt privé ---
 .env
 .env.*
+# Exception : le modèle de configuration, qui ne contient que des valeurs
+# de développement et sert de documentation.
+!.env.example
 *.pem
 *.key
 secrets/
