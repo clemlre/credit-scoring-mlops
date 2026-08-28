@@ -721,6 +721,42 @@ centaine se déclencherait par pur effet du nombre."
 - Produit : `psi_baseline` — `pd.Series` indexée par feature, consommée par la tâche 7
   pour comparaison.
 
+- [ ] **Étape 0 : Aligner les types des deux populations**
+
+**Sans cette étape, le rapport global de l'étape 1 échoue.** Vérifié :
+
+```
+ValueError: Cannot calculate drift metric for column
+'NAME_CONTRACT_TYPE_Cash_loans' with type ColumnType.Unknown
+```
+
+La référence lue du parquet porte **133 colonnes `bool`** et 41 `int64`, alors que les
+mêmes features reviennent en **`float64`** après leur aller-retour par l'API et JSON.
+Evidently refuse de comparer un `bool` à un `float64` — comportement correct : mieux vaut
+un refus qu'un résultat faux.
+
+Le correctif appartient au **bloc de chargement**, pas à cette section : les deux
+populations doivent être comparables partout, pas seulement là où le problème s'est
+manifesté. Ajouter le cast à la fin de la construction de `reference`, **dans la cellule
+de code n°1 du notebook et dans `scratch/charger.py`** :
+
+```python
+# La référence vient du parquet, où les indicateurs one-hot sont des booléens ; les
+# mêmes features reviennent en float64 après l'aller-retour par l'API et JSON. Evidently
+# refuse de comparer deux types différents, et il a raison : comparer un bool à un float
+# n'a pas de sens. Le cast est sans perte (True -> 1.0).
+reference = reference.astype("float64")
+```
+
+Vérifier ensuite que les deux populations ont des types homogènes :
+
+```python
+print(reference.dtypes.astype(str).value_counts())
+print(fenetre_a[NOMS_FEATURES].dtypes.astype(str).value_counts())
+```
+
+Attendu : `float64  779` des deux côtés.
+
 - [ ] **Étape 1 : Prototyper**
 
 `scratch/charger.py` est conservé de la tâche 4 à la tâche 11 : il porte le bloc de
@@ -795,9 +831,15 @@ print("\nBaseline calculée.")
 uv run python scratch/baseline.py
 ```
 
-Attendu : la part de features en dérive est faible — le trafic simulé est tiré du même
-jeu Home Credit que la référence. C'est le résultat honnête, et il doit être rapporté
-tel quel : la section suivante démontrera la détection sur un cas réellement décalé.
+**Compter environ 2 min 30 pour le rapport global sur 779 colonnes** : c'est normal, ce
+n'est pas un blocage. Mesuré : 145 s.
+
+Attendu, mesuré par le contrôleur avec le cast de l'étape 0 : **29 features en dérive sur
+779, soit 3,7 %**. La part est faible parce que le trafic simulé est tiré du même jeu
+Home Credit que la référence. C'est le résultat honnête, et il doit être rapporté tel
+quel : la section suivante démontrera la détection sur un cas réellement décalé.
+
+Si le chiffre obtenu s'écarte nettement de 3,7 %, le signaler plutôt que de l'accepter.
 
 - [ ] **Étape 3 : Reporter dans le notebook**
 
