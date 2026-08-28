@@ -631,7 +631,20 @@ et s'exécutent à chaque lancement."
 
 - [ ] **Étape 1 : Prototyper**
 
-Créer `scratch/features_suivies.py` reprenant le chargement, puis :
+`scratch/charger.py` est conservé de la tâche 4 à la tâche 11 : il porte le bloc de
+chargement commun (bornes, échantillon de référence, `charger_fenetre`) et ses
+assertions de dimensions. Commence donc ton prototype par :
+
+```python
+import sys
+sys.path.insert(0, "scratch")
+from charger import *  # noqa: F403
+```
+
+Cela évite de reconstruire six fois le même bloc, avec six occasions de diverger sur
+les bornes ou la graine d'échantillonnage.
+
+Créer ensuite `scratch/features_suivies.py` :
 
 ```python
 NB_FEATURES_SUIVIES = 20
@@ -710,8 +723,21 @@ centaine se déclencherait par pur effet du nombre."
 
 - [ ] **Étape 1 : Prototyper**
 
-Créer `scratch/baseline.py` reprenant le chargement, `psi_par_colonne`, `bande`,
-`importances` et `FEATURES_SUIVIES`, puis :
+`scratch/charger.py` est conservé de la tâche 4 à la tâche 11 : il porte le bloc de
+chargement commun (bornes, échantillon de référence, `charger_fenetre`) et ses
+assertions de dimensions. Commence donc ton prototype par :
+
+```python
+import sys
+sys.path.insert(0, "scratch")
+from charger import *  # noqa: F403
+```
+
+Cela évite de reconstruire six fois le même bloc, avec six occasions de diverger sur
+les bornes ou la graine d'échantillonnage.
+
+Créer ensuite `scratch/baseline.py`, en y redéfinissant `psi_par_colonne`, `bande`,
+`importances` et `FEATURES_SUIVIES` (ils vivent dans le notebook, pas dans `charger.py`) :
 
 ```python
 # Features exclues de la comparaison : une feature absente d'un des deux jeux est une
@@ -828,7 +854,21 @@ produirait des dérives fantômes."
 
 - [ ] **Étape 1 : Prototyper**
 
-Créer `scratch/scenario.py` reprenant ce qui précède, puis :
+`scratch/charger.py` est conservé de la tâche 4 à la tâche 11 : il porte le bloc de
+chargement commun (bornes, échantillon de référence, `charger_fenetre`) et ses
+assertions de dimensions. Commence donc ton prototype par :
+
+```python
+import sys
+sys.path.insert(0, "scratch")
+from charger import *  # noqa: F403
+```
+
+Cela évite de reconstruire six fois le même bloc, avec six occasions de diverger sur
+les bornes ou la graine d'échantillonnage.
+
+Créer ensuite `scratch/scenario.py`, en y redéfinissant ce que les tâches 4 à 6 ont
+mis dans le notebook (`psi_par_colonne`, `bande`, `FEATURES_SUIVIES`, `psi_baseline`) :
 
 ```python
 COLONNES_DECALEES = [c for c in FEATURES_SUIVIES if c.startswith("EXT_SOURCE")]
@@ -931,7 +971,20 @@ seuil de décalage à partir duquel la dérive devient détectable."
 
 - [ ] **Étape 1 : Prototyper**
 
-Créer `scratch/score.py` reprenant le chargement, puis :
+`scratch/charger.py` est conservé de la tâche 4 à la tâche 11 : il porte le bloc de
+chargement commun (bornes, échantillon de référence, `charger_fenetre`) et ses
+assertions de dimensions. Commence donc ton prototype par :
+
+```python
+import sys
+sys.path.insert(0, "scratch")
+from charger import *  # noqa: F403
+```
+
+Cela évite de reconstruire six fois le même bloc, avec six occasions de diverger sur
+les bornes ou la graine d'échantillonnage.
+
+Créer ensuite `scratch/score.py` :
 
 ```python
 SEUIL_DECISION = 0.10  # seuil métier de la Partie 1 : coût = 10 x FN + 1 x FP
@@ -1022,7 +1075,21 @@ La mission demande explicitement ces métriques, au même titre que la dérive :
 
 - [ ] **Étape 1 : Prototyper**
 
-Créer `scratch/operationnel.py` reprenant le chargement et `fenetres`, puis :
+`scratch/charger.py` est conservé de la tâche 4 à la tâche 11 : il porte le bloc de
+chargement commun (bornes, échantillon de référence, `charger_fenetre`) et ses
+assertions de dimensions. Commence donc ton prototype par :
+
+```python
+import sys
+sys.path.insert(0, "scratch")
+from charger import *  # noqa: F403
+```
+
+Cela évite de reconstruire six fois le même bloc, avec six occasions de diverger sur
+les bornes ou la graine d'échantillonnage.
+
+Créer ensuite `scratch/operationnel.py`, en y reconstruisant `fenetres` comme la
+tâche 8 le fait :
 
 ```python
 latences = fenetres.groupby("fenetre")["latency_ms"].describe(
