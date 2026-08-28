@@ -925,6 +925,9 @@ seuil de décalage à partir duquel la dérive devient détectable."
 - Consomme : `fenetre_a`, `fenetre_b`
 - Produit : `resume_decisions` — `pd.DataFrame` indexé par fenêtre, colonnes
   `predictions`, `taux_refus`, `proba_moyenne`, `proba_p95`. Consommé par la tâche 10.
+- Produit aussi : `fenetres` — les deux fenêtres empilées avec une colonne `fenetre`
+  valant `"A — nominal"` ou `"B — décalé"`. Ces deux libellés exacts servent d'index
+  dans les tâches 9 et 10 : ne pas les modifier.
 
 - [ ] **Étape 1 : Prototyper**
 
