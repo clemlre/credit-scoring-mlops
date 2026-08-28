@@ -265,7 +265,7 @@ uv run python scripts/simuler_trafic.py --url http://127.0.0.1:8001 --nombre 100
 ```
 
 Attendu : le taux de refus est nettement supérieur à celui de la fenêtre A. Sur les
-mesures antérieures : ~13,5 % de refus en trafic normal contre ~39 % à `--decalage 0.2`.
+mesures effectives : 20,7 % de refus en trafic normal contre 45,0 % à `--decalage 0.2`.
 
 - [ ] **Étape 5 : Relever la borne de fin et contrôler les volumes**
 
@@ -963,7 +963,14 @@ uv run python scratch/score.py
 ```
 
 Attendu : le taux de refus de la fenêtre B dépasse nettement celui de la fenêtre A.
-Ordre de grandeur observé lors des essais : ~13,5 % contre ~39 %.
+Valeurs **effectivement mesurées** sur les deux fenêtres générées en tâche 2 :
+**20,7 %** de refus en fenêtre A (3 000 dossiers) contre **45,0 %** en fenêtre B
+(1 000 dossiers, `--decalage 0.2`). Un facteur 2,2.
+
+Ces chiffres diffèrent d'essais antérieurs (~13,5 % / ~39 %) menés sur des échantillons
+de 200 et 120 dossiers : `simuler_trafic.py` tire avec `sample(n=nombre, random_state=42)`,
+donc un `n` différent produit un échantillon différent. Les valeurs ci-dessus, assises
+sur 4 000 dossiers, font foi.
 
 Si `include_groups=False` provoque une erreur, la version de pandas est antérieure à
 2.2 : retirer l'argument.
