@@ -52,3 +52,27 @@ HISTORY_PREFIXES = (
 # Borne le coût d'une requête : sans plafond, un client peut réclamer 10 millions de
 # scores et saturer le service. 1 000 couvre largement les usages de monitoring.
 MAX_BATCH_SIZE = int(os.environ.get("MAX_BATCH_SIZE", "1000"))
+
+# --- Journalisation des prédictions de production ---
+#
+# `DATABASE_URL` est la SEULE variable secrète de l'API : elle contient le mot de
+# passe PostgreSQL. Elle vient de l'environnement (secret du pipeline, secret du
+# Space, variable d'environnement du conteneur) et n'est jamais écrite dans le
+# dépôt — d'où l'absence totale de valeur par défaut ici.
+#
+# Non définie ⇒ la journalisation en base est simplement désactivée, et l'API
+# continue d'émettre ses prédictions en JSON sur la sortie standard. C'est le
+# comportement voulu en test, en CI et pour un `docker run` de démonstration :
+# le service ne doit pas exiger une base pour rendre un score.
+DATABASE_URL = os.environ.get("DATABASE_URL") or None
+
+# Le pool reste petit : l'écriture d'une prédiction est brève et a lieu hors du
+# chemin de réponse. Un pool large immobiliserait des connexions PostgreSQL — une
+# ressource comptée côté serveur — pour rien.
+DB_POOL_MIN_SIZE = int(os.environ.get("DB_POOL_MIN_SIZE", "1"))
+DB_POOL_MAX_SIZE = int(os.environ.get("DB_POOL_MAX_SIZE", "4"))
+
+# Délais courts et bornés : le monitoring n'a pas le droit d'accumuler des tâches
+# d'arrière-plan en attente sur une base qui ne répond plus.
+DB_CONNECT_TIMEOUT = float(os.environ.get("DB_CONNECT_TIMEOUT", "5"))
+DB_WRITE_TIMEOUT = float(os.environ.get("DB_WRITE_TIMEOUT", "5"))
