@@ -21,7 +21,7 @@ de 779 features agrégées sur son historique. La décision d'octroi se prend au
 |---|---|---|
 | 1 | Contrôle de version, structure du projet, documentation initiale | ✅ en place |
 | 2 | API de prédiction, tests, Dockerfile, pipeline CI/CD | ✅ en place |
-| 3 | Stockage des données de production + analyse du data drift | ⬜ à venir |
+| 3 | Stockage des données de production + analyse du data drift | 🟨 stockage en place, drift à venir |
 | 4 | Profiling et optimisation des performances d'inférence | ⬜ à venir |
 
 ## Structure du dépôt
@@ -32,10 +32,13 @@ de 779 features agrégées sur son historique. La décision d'octroi se prend au
 │   ├── config.py         #   réglages lus depuis l'environnement
 │   ├── model.py          #   chargement du modèle et inférence
 │   ├── schemas.py        #   contrat d'entrée/sortie (Pydantic → Swagger)
+│   ├── storage.py        #   journal des prédictions (stdout JSON + PostgreSQL)
 │   └── main.py           #   routes et gestion des erreurs
 ├── src/                  # pipeline de features + entraînement (hérité de la Partie 1)
 │   └── export_model.py   #   pont MLflow → artefact déployable
-├── scripts/smoke_test.py # vérifie un service qui tourne (conteneur, déploiement)
+├── scripts/
+│   ├── smoke_test.py     #   vérifie un service qui tourne (conteneur, déploiement)
+│   └── simuler_trafic.py #   alimente le journal de production en trafic réaliste
 ├── notebooks/            # analyses Partie 1, puis notebook de data drift (étape 3)
 ├── tests/                # tests automatisés pytest
 ├── models/               # artefact déployable + paramètres de référence
@@ -44,6 +47,7 @@ de 779 features agrégées sur son historique. La décision d'octroi se prend au
 ├── data/                 # CSV Home Credit — NON versionnés, voir data/README.md
 ├── .github/workflows/    # pipeline CI/CD
 ├── Dockerfile            # image de l'API (multi-étapes, utilisateur non-root)
+├── docker-compose.yml    # pile locale : API + PostgreSQL (+ pgAdmin en option)
 └── pyproject.toml        # dépendances, gérées avec uv
 ```
 
@@ -205,7 +209,36 @@ et à quelle condition elle deviendrait mauvaise — dans
 
 ## Interpréter le monitoring
 
-> _Section à compléter à l'étape 3._
+L'API journalise **chaque prédiction rendue** sur deux canaux : une ligne JSON sur la
+sortie standard (toujours, sans valeur de feature) et une ligne en base PostgreSQL
+(avec les features, en `JSONB`). La documentation complète — schéma, requêtes types,
+volumétrie mesurée, comportement en cas de panne — est dans
+[`docs/monitoring.md`](docs/monitoring.md).
+
+**Démarrer la pile complète :**
+
+```bash
+docker compose up -d --build          # API + PostgreSQL
+python scripts/simuler_trafic.py      # alimente le journal en trafic réaliste
+docker exec scoring-db psql -U scoring -d monitoring
+```
+
+**Trois choses à savoir pour lire ce monitoring :**
+
+1. **`decision` se lit avec `threshold`.** Le seuil vaut 0,10, pas 0,5 : un taux de
+   refus de 15 % est normal, pas alarmant. C'est le coût métier (`10 × FN + 1 × FP`)
+   qui l'impose.
+2. **Un taux de refus qui monte n'accuse pas forcément le modèle.** Les colonnes
+   `application_ratio` et `history_ratio` disent sur quelle quantité d'information
+   chaque score a été calculé : des dossiers plus incomplets produisent mécaniquement
+   d'autres décisions. Vérifier la couverture avant de conclure à une dérive.
+3. **Un `X-Request-ID` est renvoyé dans chaque réponse.** C'est la clé pour retrouver
+   en base la décision exacte contestée par un conseiller, avec les features qui l'ont
+   produite.
+
+L'état du journal est exposé par `GET /health`, dans `prediction_log` — sans jamais
+influencer le code de statut : une base de monitoring en panne ne doit pas faire
+retirer l'API du trafic.
 
 ## Conventions de travail
 
