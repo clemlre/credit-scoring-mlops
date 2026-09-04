@@ -25,6 +25,30 @@ jobs:
   qualite:
     name: Lint et tests
     runs-on: ubuntu-latest
+
+    # PostgreSQL éphémère, monté le temps du job. Sans lui, les tests d'intégration
+    # du journal des prédictions seraient `skipped` en CI : le pipeline validerait
+    # la logique du code sans jamais vérifier que le SQL est exécutable.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: scoring
+          # Ce mot de passe n'est PAS un secret et n'a pas à en être un : le service
+          # vit le temps du job, sur le réseau privé du runner, et n'est joignable
+          # de nulle part ailleurs. Le mettre dans les secrets du dépôt donnerait
+          # l'illusion d'une protection sans rien protéger. Le vrai secret, c'est
+          # DATABASE_URL en production.
+          POSTGRES_PASSWORD: postgres_ci
+          POSTGRES_DB: monitoring
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +73,12 @@ jobs:
       - name: Lancer les tests avec mesure de couverture
         # Le plancher de couverture (95 %) est défini dans pyproject.toml et
         # appliqué par coverage lui-même : le job échoue si la couverture baisse.
+        #
+        # DATABASE_URL active les tests d'intégration du journal des prédictions
+        # contre le service PostgreSQL ci-dessus. Sans cette variable ils seraient
+        # simplement ignorés — et un test ignoré ne prouve rien.
+        env:
+          DATABASE_URL: postgresql://scoring:postgres_ci@localhost:5432/monitoring
         run: uv run pytest --cov=api --cov-report=term-missing --cov-report=xml
 
       - name: Publier le rapport de couverture
@@ -187,6 +217,13 @@ jobs:
           } > README.space.md
           mv README.space.md README.md
 
+          # Hugging Face refuse les fichiers binaires poussés en Git ordinaire : il
+          # impose son stockage Xet. Les captures d'écran sont un livrable du dépôt
+          # GitHub, pas un élément d'exécution du service — on les retire de l'arbre
+          # envoyé au Space plutôt que d'ajouter une dépendance de stockage à un
+          # service qui n'en a aucun besoin.
+          rm -rf docs/screenshots
+
       - name: Déployer sur Hugging Face Spaces
         if: steps.verif.outputs.configure == 'true'
         env:
@@ -195,7 +232,9 @@ jobs:
         run: |
           git config user.email "ci@users.noreply.github.com"
           git config user.name "CI"
-          git add README.md
+          # `-A` enregistre aussi la suppression des captures faite à l'étape
+          # précédente ; sans lui, elles repartiraient dans la poussée.
+          git add -A
           git commit -m "chore: configuration du Space"
           # Le jeton passe par l'URL distante, jamais par un fichier du dépôt, et
           # n'apparaît pas dans les journaux (GitHub masque la valeur du secret).
