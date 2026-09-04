@@ -99,3 +99,4 @@ décision avec le seuil, et le refus d'une entrée invalide.
 | Le Space ignore la configuration | en-tête YAML absent du README | généré par le pipeline avant la poussée |
 | `! [remote rejected] … shallow update not allowed` | `actions/checkout` fait un clone superficiel, impossible à pousser vers un autre serveur Git | `fetch-depth: 0` sur le job de déploiement |
 | Le test de fumée échoue alors que le Space finit par tourner | le premier build d'une image de 583 Mo dépasse largement le délai d'attente fixe qui était utilisé | attente de l'état `RUNNING` via l'API, au lieu d'une durée en dur |
+| `Your push was rejected because it contains binary files` | Hugging Face impose son stockage Xet pour les binaires poussés en Git ordinaire ; les captures d'écran du dépôt en sont | `docs/screenshots/` est retiré de l'arbre envoyé au Space : c'est un livrable GitHub, pas un élément d'exécution |
