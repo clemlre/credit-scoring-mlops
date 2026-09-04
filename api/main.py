@@ -13,12 +13,14 @@ Documentation interactive : http://127.0.0.1:8000/docs
 from __future__ import annotations
 
 import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from api import config
 from api.model import ModelLoadError, Prediction, ScoringModel
@@ -30,9 +32,11 @@ from api.schemas import (
     FeaturesResponse,
     HealthResponse,
     ModelInfoResponse,
+    PredictionLogStatus,
     PredictionRequest,
     PredictionResponse,
 )
+from api.storage import PredictionLog, build_record
 
 logger = logging.getLogger("api")
 
@@ -64,7 +68,16 @@ async def lifespan(app: FastAPI):
         app.state.model = None
         app.state.model_error = str(exc)
         logger.error("Démarrage en mode dégradé : %s", exc)
+
+    # Le journal des prédictions suit le même principe que le modèle : ouvert une
+    # fois ici, fermé à l'arrêt. `open()` ne lève jamais — une base injoignable
+    # laisse le service opérationnel, avec le seul canal `stdout`.
+    app.state.prediction_log = PredictionLog(config.DATABASE_URL)
+    app.state.prediction_log.open()
+
     yield
+
+    app.state.prediction_log.close()
     app.state.model = None
 
 
@@ -83,6 +96,21 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def tag_request(request: Request, call_next):
+    """Attribue un identifiant unique à chaque requête et le renvoie en en-tête.
+
+    C'est ce qui rend le journal des prédictions exploitable : quand un conseiller
+    conteste un refus, il transmet le `X-Request-ID` reçu et l'on retrouve la ligne
+    exacte en base — score, seuil, version du modèle et features envoyées. Sans cet
+    identifiant, il faudrait chercher par horodatage approximatif.
+    """
+    request.state.request_id = str(uuid.uuid4())
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request.state.request_id
+    return response
 
 
 def get_model(request: Request) -> ScoringModel:
@@ -203,6 +231,59 @@ def _validate(model: ScoringModel, features: dict) -> None:
         )
 
 
+def _journaliser_sans_echec(journal, records) -> None:
+    """Ultime filet : aucune exception ne sort d'une tâche de journalisation.
+
+    `PredictionLog.record` absorbe déjà ses propres erreurs, mais l'invariant « le
+    monitoring ne casse jamais une prédiction » ne doit pas dépendre de la
+    discipline d'une seule classe. Une exception qui remonterait d'ici serait levée
+    *après* l'envoi de la réponse : le client aurait son score, mais le serveur
+    afficherait une trace et pourrait couper la connexion. On la piège donc ici, une
+    fois pour toutes, quel que soit le journal branché.
+    """
+    try:
+        journal.record(records)
+    except Exception:
+        logger.exception("Journalisation des prédictions impossible")
+
+
+def _journaliser(
+    request: Request,
+    background: BackgroundTasks,
+    endpoint: str,
+    rows: list[dict],
+    predictions: list[Prediction],
+    model: ScoringModel,
+    latency_ms: float,
+) -> None:
+    """Programme l'écriture des prédictions au journal, **après** la réponse.
+
+    `BackgroundTasks` garantit que l'appelant reçoit son score sans attendre
+    l'écriture en base : le monitoring n'entre pas dans le temps de réponse. Pour
+    un lot, tout part en un seul appel — donc un seul `executemany`.
+
+    Passé une certaine charge, cette approche montrerait ses limites (une tâche par
+    requête, sans file d'attente bornée) ; la suite serait une file interne avec un
+    consommateur unique, ou un envoi vers un collecteur externe.
+    """
+    latence_unitaire = latency_ms / len(predictions) if predictions else latency_ms
+    records = [
+        build_record(
+            request_id=getattr(request.state, "request_id", "inconnu"),
+            endpoint=endpoint,
+            features=features,
+            probability=prediction.probability,
+            decision=prediction.decision,
+            coverage=prediction.coverage,
+            model_version=model.version,
+            threshold=model.threshold,
+            latency_ms=latence_unitaire,
+        )
+        for features, prediction in zip(rows, predictions)
+    ]
+    background.add_task(_journaliser_sans_echec, request.app.state.prediction_log, records)
+
+
 def _to_response(prediction: Prediction, model: ScoringModel) -> PredictionResponse:
     return PredictionResponse(
         probability=prediction.probability,
@@ -218,6 +299,19 @@ def _to_response(prediction: Prediction, model: ScoringModel) -> PredictionRespo
     )
 
 
+@app.get("/", include_in_schema=False)
+def racine() -> RedirectResponse:
+    """Renvoie la racine vers la documentation interactive.
+
+    Sans elle, `GET /` répond 404 : c'est la première chose que voit quelqu'un qui
+    ouvre l'URL du service déployé, et une erreur fait une mauvaise carte de visite.
+    La route est masquée du schéma OpenAPI — c'est un confort de navigation, pas un
+    point d'entrée métier, et le contrat publié continue de ne décrire que les cinq
+    routes réelles.
+    """
+    return RedirectResponse(url="/docs")
+
+
 @app.get(
     "/health",
     response_model=HealthResponse,
@@ -226,12 +320,25 @@ def _to_response(prediction: Prediction, model: ScoringModel) -> PredictionRespo
     responses={503: {"model": HealthResponse, "description": "Modèle non chargé."}},
 )
 def health(request: Request) -> JSONResponse:
-    """Sonde de disponibilité : répond 503 tant que le modèle n'est pas servable."""
+    """Sonde de disponibilité : répond 503 tant que le modèle n'est pas servable.
+
+    L'état du journal des prédictions est rapporté, mais **n'influence pas le code
+    de statut** : si PostgreSQL tombe, l'API sait toujours scorer, et la retirer du
+    trafic transformerait une panne de monitoring en panne de production.
+    """
+    journal = getattr(request.app.state, "prediction_log", None)
+    etat_journal = PredictionLogStatus(**journal.status()) if journal is not None else None
+
     model = getattr(request.app.state, "model", None)
     if model is None:
-        body = HealthResponse(status="degraded", model_loaded=False)
+        body = HealthResponse(status="degraded", model_loaded=False, prediction_log=etat_journal)
         return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=body.model_dump())
-    body = HealthResponse(status="ok", model_loaded=True, model_version=model.version)
+    body = HealthResponse(
+        status="ok",
+        model_loaded=True,
+        model_version=model.version,
+        prediction_log=etat_journal,
+    )
     return JSONResponse(status_code=status.HTTP_200_OK, content=body.model_dump())
 
 
@@ -292,11 +399,20 @@ def features(model: ModelDependency) -> FeaturesResponse:
     },
 )
 def predict(
-    payload: PredictionRequest, model: ModelDependency
+    payload: PredictionRequest,
+    model: ModelDependency,
+    request: Request,
+    background: BackgroundTasks,
 ) -> PredictionResponse:
     """Renvoie la probabilité de défaut et la décision d'octroi au seuil métier."""
     _validate(model, payload.features)
+    debut = time.perf_counter()
     prediction = model.predict([payload.features])[0]
+    latence_ms = (time.perf_counter() - debut) * 1000
+
+    _journaliser(
+        request, background, "/predict", [payload.features], [prediction], model, latence_ms
+    )
     return _to_response(prediction, model)
 
 
@@ -311,7 +427,10 @@ def predict(
     },
 )
 def predict_batch(
-    payload: BatchPredictionRequest, model: ModelDependency
+    payload: BatchPredictionRequest,
+    model: ModelDependency,
+    request: Request,
+    background: BackgroundTasks,
 ) -> BatchPredictionResponse:
     """Score un lot de demandes.
 
@@ -339,7 +458,11 @@ def predict_batch(
             ) from exc
         rows.append(item.features)
 
+    debut = time.perf_counter()
     predictions = model.predict(rows)
+    latence_ms = (time.perf_counter() - debut) * 1000
+
+    _journaliser(request, background, "/predict/batch", rows, predictions, model, latence_ms)
     return BatchPredictionResponse(
         predictions=[_to_response(p, model) for p in predictions]
     )

@@ -1,0 +1,80 @@
+# Pile complète de l'API et de son stockage de production, en local.
+#
+#   docker compose up -d --build           API + PostgreSQL
+#   docker compose --profile outils up -d  ... plus pgAdmin, pour inspecter la base
+#
+# Ce fichier sert à trois choses : faire tourner la pile en développement, produire
+# les captures d'écran de la solution de stockage attendues au livrable, et exécuter
+# les tests d'intégration contre un vrai PostgreSQL.
+#
+# Il n'est PAS une cible de déploiement : en production, la base est un service géré
+# (RDS, Cloud SQL, Neon…) dont l'URL arrive par un secret. Voir docs/monitoring.md.
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: scoring-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-scoring}
+      # Mot de passe de DÉVELOPPEMENT, surchargeable par un fichier .env local.
+      # Aucun secret de production ne doit atterrir ici : ce fichier est versionné
+      # dans un dépôt public.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scoring_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-monitoring}
+    ports:
+      # Exposé sur l'hôte pour que pytest et psql puissent l'atteindre depuis le
+      # poste de dev. En production, une base n'est jamais publiée sur l'extérieur.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `depends_on: condition: service_healthy` s'appuie dessus : sans cette sonde,
+      # l'API démarrerait pendant l'initialisation du cluster PostgreSQL.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-scoring} -d ${POSTGRES_DB:-monitoring}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    container_name: scoring-api
+    environment:
+      # La seule variable sensible de l'API. En production elle vient d'un secret
+      # du pipeline ou de l'hébergeur, jamais d'un fichier du dépôt.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-scoring}:${POSTGRES_PASSWORD:-scoring_dev}@db:5432/${POSTGRES_DB:-monitoring}
+    ports:
+      # Port hôte surchargeable : 8000 est un port très disputé sur un poste de dev
+      # qui fait tourner plusieurs projets. Le port interne, lui, ne bouge pas.
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Profil `outils` : ne démarre que sur demande explicite. Sert à inspecter la base
+  # et à produire les captures d'écran du livrable « solution de stockage ».
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: scoring-pgadmin
+    profiles: ["outils"]
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@local.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin_dev}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      # La connexion à la base est pré-déclarée : les captures d'écran du livrable
+      # sont ainsi reproductibles, sans dix clics de configuration manuelle.
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
+    volumes:
+      - ./docs/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    ports:
+      - "5050:80"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  # Volume nommé : les prédictions survivent à `docker compose down`. Sans lui, le
+  # stockage de production disparaîtrait au premier redémarrage — ce qui viderait
+  # de son sens l'analyse de dérive, qui compare des fenêtres temporelles.
+  pgdata:

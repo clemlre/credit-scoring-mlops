@@ -312,3 +312,143 @@ class TestPredictionParLot:
         )
         assert response.status_code == 422
         assert "Demande n°2" in response.json()["detail"]
+
+
+class TestJournalisationDesPredictions:
+    """Ce que l'API promet côté monitoring, vérifié depuis l'extérieur.
+
+    Ces tests ne touchent pas à PostgreSQL : ils vérifient le **contrat HTTP** et
+    l'invariant « le monitoring ne casse jamais une prédiction ». La validité du
+    SQL est couverte séparément, dans `test_storage.py`.
+    """
+
+    @pytest.fixture
+    def journal_espion(self, client):
+        """Remplace le journal par un espion, puis restaure l'original."""
+        from api.main import app
+
+        class Espion:
+            def __init__(self):
+                self.recus = []
+
+            def record(self, records):
+                self.recus.extend(records)
+
+            def status(self):
+                return {"stdout": True, "database": "ready", "last_error": None}
+
+        original = app.state.prediction_log
+        espion = Espion()
+        app.state.prediction_log = espion
+        yield espion
+        app.state.prediction_log = original
+
+    def test_chaque_reponse_porte_un_identifiant_de_requete(self, client, valid_features):
+        """Sans identifiant renvoyé, impossible de relier une réclamation client à
+        la ligne correspondante en base."""
+        response = client.post("/predict", json={"features": valid_features})
+        assert response.status_code == 200
+        assert response.headers["X-Request-ID"]
+
+    def test_deux_requetes_ont_des_identifiants_distincts(self, client, valid_features):
+        premier = client.post("/predict", json={"features": valid_features})
+        second = client.post("/predict", json={"features": valid_features})
+        assert premier.headers["X-Request-ID"] != second.headers["X-Request-ID"]
+
+    def test_une_prediction_est_journalisee(self, client, valid_features, journal_espion):
+        response = client.post("/predict", json={"features": valid_features})
+
+        assert len(journal_espion.recus) == 1
+        enregistrement = journal_espion.recus[0]
+        assert enregistrement.request_id == response.headers["X-Request-ID"]
+        assert enregistrement.endpoint == "/predict"
+        assert enregistrement.probability == response.json()["probability"]
+        assert enregistrement.decision == response.json()["decision"]
+        assert enregistrement.model_version == "1"
+        assert enregistrement.latency_ms > 0
+
+    def test_le_payload_recu_est_conserve_tel_quel(self, client, valid_features, journal_espion):
+        """C'est cette copie qui permettra de mesurer la dérive des données."""
+        client.post("/predict", json={"features": valid_features})
+        assert journal_espion.recus[0].features == valid_features
+
+    def test_un_lot_journalise_chaque_demande(self, client, valid_features, journal_espion):
+        client.post(
+            "/predict/batch",
+            json={"items": [{"features": valid_features}] * 3},
+        )
+        assert len(journal_espion.recus) == 3
+        assert {r.endpoint for r in journal_espion.recus} == {"/predict/batch"}
+
+    def test_une_requete_refusee_n_est_pas_journalisee(
+        self, client, sparse_features, journal_espion
+    ):
+        """Seules les prédictions réellement rendues entrent au journal : une 422
+        n'a produit aucun score à surveiller."""
+        response = client.post("/predict", json={"features": sparse_features})
+        assert response.status_code == 422
+        assert journal_espion.recus == []
+
+    def test_une_panne_du_journal_ne_casse_pas_la_prediction(self, client, valid_features):
+        """L'invariant central. Le score doit être rendu même si la journalisation
+        échoue : une panne de monitoring n'est pas une panne de production."""
+        from api.main import app
+
+        class JournalEnPanne:
+            def record(self, records):
+                raise RuntimeError("panne de journalisation simulée")
+
+            def status(self):
+                return {"stdout": True, "database": "unavailable", "last_error": "simulée"}
+
+        original = app.state.prediction_log
+        app.state.prediction_log = JournalEnPanne()
+        try:
+            response = client.post("/predict", json={"features": valid_features})
+        finally:
+            app.state.prediction_log = original
+
+        assert response.status_code == 200
+        assert "probability" in response.json()
+
+    def test_letat_du_journal_est_expose_par_health(self, client):
+        body = client.get("/health").json()
+        assert body["prediction_log"]["stdout"] is True
+        # Sans DATABASE_URL en test, le stockage est désactivé — et c'est normal.
+        assert body["prediction_log"]["database"] in {"ready", "disabled", "unavailable"}
+
+    def test_une_base_en_panne_ne_rend_pas_le_service_indisponible(self, client):
+        """Retirer l'API du trafic parce que la base de monitoring est tombée
+        transformerait une panne d'observabilité en panne de service."""
+        from api.main import app
+
+        class JournalDegrade:
+            def status(self):
+                return {"stdout": True, "database": "unavailable", "last_error": "simulée"}
+
+        original = app.state.prediction_log
+        app.state.prediction_log = JournalDegrade()
+        try:
+            response = client.get("/health")
+        finally:
+            app.state.prediction_log = original
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+        assert response.json()["prediction_log"]["database"] == "unavailable"
+
+
+def test_racine_redirige_vers_la_documentation(client):
+    """La racine ne doit pas répondre 404 : c'est la porte d'entrée du service déployé."""
+    reponse = client.get("/", follow_redirects=False)
+    assert reponse.status_code in (302, 307)
+    assert reponse.headers["location"] == "/docs"
+
+
+def test_racine_absente_du_contrat_publie(client):
+    """La redirection est un confort de navigation, pas un point d'entrée métier."""
+    schema = client.get("/openapi.json").json()
+    assert "/" not in schema["paths"]
+    assert set(schema["paths"]) == {
+        "/health", "/model/info", "/features", "/predict", "/predict/batch",
+    }
