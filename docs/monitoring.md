@@ -216,16 +216,27 @@ Ouvrir <http://localhost:5050>. La connexion **« Monitoring - scoring de credit
 est déjà déclarée (voir `docs/pgadmin/servers.json`) ; il reste à saisir le mot de
 passe de développement (`scoring_dev` par défaut, ou celui de votre `.env`).
 
-Captures utiles :
+### Captures produites
 
-1. l'arborescence `monitoring → Schemas → public → Tables → predictions` ;
-2. la structure de la table (colonnes et types, dont `features` en `jsonb`) ;
-3. les lignes réelles (`View/Edit Data → All Rows`), en dépliant une cellule
-   `features` ;
-4. le résultat d'une des requêtes d'agrégation ci-dessus dans le *Query Tool* ;
-5. `docker compose ps` montrant les conteneurs et le volume `pgdata`.
+Elles sont dans `docs/screenshots/` et constituent le livrable « captures d'écran de la
+solution de stockage ».
 
-Ranger les images dans `docs/screenshots/`.
+| Fichier | Ce qu'il montre |
+|---|---|
+| `stockage-1-arborescence.png` | l'arborescence `monitoring → Schemas → public → Tables → predictions`, dépliée jusqu'aux colonnes et contraintes |
+| `stockage-2-structure-table.png` | les 14 colonnes de la table et leurs types, `features` compris |
+| `stockage-3-lignes-reelles.png` | des prédictions réellement journalisées, avec deux valeurs extraites du `jsonb` (`EXT_SOURCE_2`, `AMT_CREDIT`) et `jsonb_typeof` |
+| `stockage-4-agregation-suivi.png` | volume, taux de refus, latence et couverture agrégés par minute — on y retrouve les deux fenêtres analysées dans le notebook : 3 000 prédictions à 20,70 % de refus, puis 1 000 à 45,00 % |
+| `stockage-5-infrastructure.png` | les trois conteneurs, le volume `pgdata` et son point de montage, le volume de lignes et la taille de la table |
+
+La capture 4 est la plus utile en soutenance : elle montre la même dérive du taux de
+refus que le notebook, mais lue directement en base, sans Python ni Evidently.
+
+**À savoir sur le contenu de la table.** Elle mélange le trafic simulé du 28 août
+(les deux fenêtres d'analyse) et des prédictions plus récentes issues des tests
+d'intégration, qui écrivent dans la même base en développement. L'analyse de dérive n'en
+est pas affectée : le notebook borne ses fenêtres sur des horodatages explicites plutôt
+que de prendre la table entière. En production, les environnements seraient séparés.
 
 ## Ce qui n'est pas couvert (et pourquoi c'est assumé)
 
