@@ -452,3 +452,28 @@ def test_racine_absente_du_contrat_publie(client):
     assert set(schema["paths"]) == {
         "/health", "/model/info", "/features", "/predict", "/predict/batch",
     }
+
+
+def test_exemple_swagger_de_predict_est_executable(client):
+    """L'exemple publié dans la documentation doit renvoyer 200, pas 422.
+
+    Sans ce test, un « Try it out » sur /docs échoue en silence : c'est exactement
+    ce qui s'est produit avec l'extrait de huit features, trop incomplet pour
+    franchir le plancher de complétude du dossier.
+    """
+    schema = client.get("/openapi.json").json()
+    exemple = schema["components"]["schemas"]["PredictionRequest"]["example"]
+    reponse = client.post("/predict", json=exemple)
+    assert reponse.status_code == 200, reponse.json()
+    corps = reponse.json()
+    assert corps["decision"] in {"accepted", "rejected"}
+    assert 0.0 <= corps["probability"] <= 1.0
+
+
+def test_exemple_swagger_de_predict_batch_est_executable(client):
+    """Même exigence pour l'exemple de la route groupée."""
+    schema = client.get("/openapi.json").json()
+    exemple = schema["components"]["schemas"]["BatchPredictionRequest"]["example"]
+    reponse = client.post("/predict/batch", json=exemple)
+    assert reponse.status_code == 200, reponse.json()
+    assert len(reponse.json()["predictions"]) == len(exemple["items"])
