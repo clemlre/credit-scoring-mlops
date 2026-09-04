@@ -62,3 +62,7 @@ secrets/
 Thumbs.db
 .vscode/
 .idea/
+
+# Rapports Evidently exportés : ils agrègent des distributions de dossiers
+# Home Credit et n'ont pas leur place dans un dépôt public.
+monitoring/*.html

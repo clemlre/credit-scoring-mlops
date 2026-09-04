@@ -21,7 +21,7 @@ de 779 features agrégées sur son historique. La décision d'octroi se prend au
 |---|---|---|
 | 1 | Contrôle de version, structure du projet, documentation initiale | ✅ en place |
 | 2 | API de prédiction, tests, Dockerfile, pipeline CI/CD | ✅ en place |
-| 3 | Stockage des données de production + analyse du data drift | 🟨 stockage en place, drift à venir |
+| 3 | Stockage des données de production + analyse du data drift | ✅ en place |
 | 4 | Profiling et optimisation des performances d'inférence | ⬜ à venir |
 
 ## Structure du dépôt
@@ -42,7 +42,7 @@ de 779 features agrégées sur son historique. La décision d'octroi se prend au
 ├── notebooks/            # analyses Partie 1, puis notebook de data drift (étape 3)
 ├── tests/                # tests automatisés pytest
 ├── models/               # artefact déployable + paramètres de référence
-├── monitoring/           # logs de production et rapports de drift (étape 3)
+├── monitoring/           # réservé aux exports locaux, non versionnés
 ├── docs/                 # documentation et captures d'écran
 ├── data/                 # CSV Home Credit — NON versionnés, voir data/README.md
 ├── .github/workflows/    # pipeline CI/CD
@@ -200,6 +200,17 @@ Aucun identifiant n'est écrit dans le dépôt : la publication d'image utilise 
 La procédure de configuration du déploiement est décrite dans
 [`docs/deploiement.md`](docs/deploiement.md).
 
+### L'API en ligne
+
+Le pipeline déploie sur Hugging Face Spaces à chaque poussée sur `main` :
+
+**<https://clemlre-credit-scoring-api.hf.space>** — documentation interactive sur
+[`/docs`](https://clemlre-credit-scoring-api.hf.space/docs).
+
+Le déploiement n'est considéré comme réussi que si le Space passe à l'état `RUNNING`
+et que `scripts/smoke_test.py` obtient une réponse correcte du service en ligne. Un
+build en échec arrête le pipeline au lieu de le laisser passer au vert.
+
 ## Pourquoi ces choix techniques
 
 FastAPI plutôt que Gradio, format texte natif plutôt que pickle, bornes de validation
@@ -239,6 +250,11 @@ docker exec scoring-db psql -U scoring -d monitoring
 L'état du journal est exposé par `GET /health`, dans `prediction_log` — sans jamais
 influencer le code de statut : une base de monitoring en panne ne doit pas faire
 retirer l'API du trafic.
+
+L'analyse de la dérive des données est dans
+[`notebooks/07_data_drift.ipynb`](notebooks/07_data_drift.ipynb) : comparaison du trafic
+de production au jeu d'entraînement, démonstration de la détection sur une dérive
+provoquée, métriques opérationnelles et points de vigilance.
 
 ## Conventions de travail
 
