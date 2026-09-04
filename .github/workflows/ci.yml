@@ -217,6 +217,13 @@ jobs:
           } > README.space.md
           mv README.space.md README.md
 
+          # Hugging Face refuse les fichiers binaires poussés en Git ordinaire : il
+          # impose son stockage Xet. Les captures d'écran sont un livrable du dépôt
+          # GitHub, pas un élément d'exécution du service — on les retire de l'arbre
+          # envoyé au Space plutôt que d'ajouter une dépendance de stockage à un
+          # service qui n'en a aucun besoin.
+          rm -rf docs/screenshots
+
       - name: Déployer sur Hugging Face Spaces
         if: steps.verif.outputs.configure == 'true'
         env:
@@ -225,7 +232,9 @@ jobs:
         run: |
           git config user.email "ci@users.noreply.github.com"
           git config user.name "CI"
-          git add README.md
+          # `-A` enregistre aussi la suppression des captures faite à l'étape
+          # précédente ; sans lui, elles repartiraient dans la poussée.
+          git add -A
           git commit -m "chore: configuration du Space"
           # Le jeton passe par l'URL distante, jamais par un fichier du dépôt, et
           # n'apparaît pas dans les journaux (GitHub masque la valeur du secret).
