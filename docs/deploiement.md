@@ -73,7 +73,10 @@ pour ne pas faire échouer une CI par ailleurs valide.
   `app_port: 8000`) en tête du README, **sans le committer dans le dépôt GitHub** — le
   README du projet reste lisible.
 - Il pousse le dépôt vers le Space, qui reconstruit l'image à partir du `Dockerfile`.
-- Il attend, puis lance `scripts/smoke_test.py` sur l'URL publique du Space.
+- Il **interroge l'API Hugging Face** jusqu'à ce que le Space passe à l'état `RUNNING`
+  (15 min au maximum), puis lance `scripts/smoke_test.py` sur l'URL publique que
+  l'API déclare. Un build en échec (`BUILD_ERROR`, `RUNTIME_ERROR`, `CONFIG_ERROR`)
+  fait échouer le pipeline immédiatement, sans attendre la fin du délai.
 
 L'API est ensuite accessible sur `https://<compte>-<nom-du-space>.hf.space`, avec sa
 documentation Swagger sur `/docs`.
@@ -94,3 +97,5 @@ décision avec le seuil, et le refus d'une entrée invalide.
 | Le Space se construit puis affiche « no healthy upstream » | `app_port` ne correspond pas au port exposé | `app_port: 8000`, aligné sur le `Dockerfile` |
 | `import lightgbm` échoue au démarrage du conteneur | `libgomp1` absent des images `slim` | installé explicitement dans le `Dockerfile` |
 | Le Space ignore la configuration | en-tête YAML absent du README | généré par le pipeline avant la poussée |
+| `! [remote rejected] … shallow update not allowed` | `actions/checkout` fait un clone superficiel, impossible à pousser vers un autre serveur Git | `fetch-depth: 0` sur le job de déploiement |
+| Le test de fumée échoue alors que le Space finit par tourner | le premier build d'une image de 583 Mo dépasse largement le délai d'attente fixe qui était utilisé | attente de l'état `RUNNING` via l'API, au lieu d'une durée en dur |

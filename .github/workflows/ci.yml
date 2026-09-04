@@ -140,7 +140,12 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
+      # `fetch-depth: 0` : le checkout par défaut est un clone superficiel, et un
+      # dépôt superficiel ne peut pas être poussé vers un autre serveur Git — le
+      # Space rejetterait la poussée (« shallow update not allowed »).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Vérifier la présence des identifiants de déploiement
         id: verif
@@ -202,9 +207,37 @@ jobs:
         env:
           HF_SPACE: ${{ vars.HF_SPACE }}
         run: |
-          # Un déploiement n'est terminé que quand le service répond. Le Space doit
-          # d'abord reconstruire son image, ce qui prend quelques minutes : le test de
-          # fumée réessaie pendant une minute, on lui laisse d'abord le temps de bâtir.
-          sleep 120
-          espace=$(echo "$HF_SPACE" | tr '/' '-' | tr '[:upper:]' '[:lower:]')
-          python scripts/smoke_test.py "https://${espace}.hf.space"
+          # Un déploiement n'est terminé que quand le service répond. Plutôt que
+          # d'attendre une durée fixe — toujours trop courte au premier build, toujours
+          # trop longue ensuite — on interroge l'état réel du Space et on s'arrête dès
+          # qu'il tourne. Un build en échec est détecté tout de suite au lieu de faire
+          # patienter le pipeline jusqu'au bout.
+          for i in $(seq 1 60); do
+            reponse=$(curl -s "https://huggingface.co/api/spaces/${HF_SPACE}")
+            etat=$(printf '%s' "$reponse" | python -c 'import sys, json; print(json.load(sys.stdin).get("runtime", {}).get("stage", "INJOIGNABLE"))' 2>/dev/null || echo "INJOIGNABLE")
+            echo "  [$i/60] état du Space : $etat"
+            case "$etat" in
+              RUNNING)
+                echo "Space en service après $((i * 15)) s."
+                break
+                ;;
+              BUILD_ERROR|RUNTIME_ERROR|CONFIG_ERROR)
+                echo "::error::Le Space a échoué au stade $etat — voir les journaux du Space."
+                exit 1
+                ;;
+            esac
+            if [ "$i" -eq 60 ]; then
+              echo "::error::Le Space n'est pas en service après 15 min (dernier état : $etat)."
+              exit 1
+            fi
+            sleep 15
+          done
+          # L'URL publique est lue dans la réponse de l'API plutôt que reconstruite
+          # à partir du nom : c'est Hugging Face qui fait autorité sur son domaine.
+          # Le repli couvre le cas où l'API ne le renseignerait pas encore.
+          domaine=$(printf '%s' "$reponse" | python -c 'import sys, json; d = json.load(sys.stdin).get("runtime", {}).get("domains") or [{}]; print(d[0].get("domain", ""))' 2>/dev/null || echo "")
+          if [ -z "$domaine" ]; then
+            domaine="$(echo "$HF_SPACE" | tr '/' '-' | tr '[:upper:]' '[:lower:]').hf.space"
+          fi
+          echo "Test de fumée sur https://${domaine}"
+          python scripts/smoke_test.py "https://${domaine}"
