@@ -15,6 +15,12 @@ de 779 features agrégées sur son historique. La décision d'octroi se prend au
 0,10** (et non 0,5), parce que la métrique métier pénalise un mauvais client accepté
 **10 fois** plus qu'un bon client refusé.
 
+## L'API en service
+
+**<https://clemlre-credit-scoring-api.hf.space>** — la racine renvoie vers la
+documentation interactive Swagger. Le service est déployé par le pipeline à chaque
+poussée sur `main` ; les détails sont plus bas.
+
 ## État d'avancement
 
 | Étape | Contenu | Statut |
@@ -255,6 +261,12 @@ L'analyse de la dérive des données est dans
 [`notebooks/07_data_drift.ipynb`](notebooks/07_data_drift.ipynb) : comparaison du trafic
 de production au jeu d'entraînement, démonstration de la détection sur une dérive
 provoquée, métriques opérationnelles et points de vigilance.
+
+Les captures de la solution de stockage sont dans
+[`docs/screenshots/`](docs/screenshots/) et décrites dans
+[`docs/monitoring.md`](docs/monitoring.md) : arborescence de la base, structure de la
+table, lignes réellement journalisées avec le contenu du champ `jsonb`, agrégation de
+suivi par minute, et état de l'infrastructure.
 
 ## Conventions de travail
 
