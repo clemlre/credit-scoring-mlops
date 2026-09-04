@@ -72,7 +72,9 @@ pour ne pas faire échouer une CI par ailleurs valide.
 - Il génère l'en-tête de configuration attendu par Hugging Face (`sdk: docker`,
   `app_port: 8000`) en tête du README, **sans le committer dans le dépôt GitHub** — le
   README du projet reste lisible.
-- Il pousse le dépôt vers le Space, qui reconstruit l'image à partir du `Dockerfile`.
+- Il pousse vers le Space un **instantané** du dépôt — un unique commit sans historique,
+  dont le message porte l'empreinte du commit GitHub d'origine pour la traçabilité. Le
+  Space reconstruit ensuite l'image à partir du `Dockerfile`.
 - Il **interroge l'API Hugging Face** jusqu'à ce que le Space passe à l'état `RUNNING`
   (15 min au maximum), puis lance `scripts/smoke_test.py` sur l'URL publique que
   l'API déclare. Un build en échec (`BUILD_ERROR`, `RUNTIME_ERROR`, `CONFIG_ERROR`)
@@ -100,3 +102,4 @@ décision avec le seuil, et le refus d'une entrée invalide.
 | `! [remote rejected] … shallow update not allowed` | `actions/checkout` fait un clone superficiel, impossible à pousser vers un autre serveur Git | `fetch-depth: 0` sur le job de déploiement |
 | Le test de fumée échoue alors que le Space finit par tourner | le premier build d'une image de 583 Mo dépasse largement le délai d'attente fixe qui était utilisé | attente de l'état `RUNNING` via l'API, au lieu d'une durée en dur |
 | `Your push was rejected because it contains binary files` | Hugging Face impose son stockage Xet pour les binaires poussés en Git ordinaire ; les captures d'écran du dépôt en sont | `docs/screenshots/` est retiré de l'arbre envoyé au Space : c'est un livrable GitHub, pas un élément d'exécution |
+| Le même refus **persiste** après avoir supprimé les binaires | Hugging Face inspecte tout l'historique poussé : les blobs restent dans les commits qui les ont ajoutés | le Space reçoit un **instantané** (`git checkout --orphan`), pas l'historique du dépôt |
