@@ -20,7 +20,7 @@ from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from api import config
 from api.model import ModelLoadError, Prediction, ScoringModel
@@ -297,6 +297,19 @@ def _to_response(prediction: Prediction, model: ScoringModel) -> PredictionRespo
             history_ratio=round(prediction.coverage.history_ratio, 4),
         ),
     )
+
+
+@app.get("/", include_in_schema=False)
+def racine() -> RedirectResponse:
+    """Renvoie la racine vers la documentation interactive.
+
+    Sans elle, `GET /` répond 404 : c'est la première chose que voit quelqu'un qui
+    ouvre l'URL du service déployé, et une erreur fait une mauvaise carte de visite.
+    La route est masquée du schéma OpenAPI — c'est un confort de navigation, pas un
+    point d'entrée métier, et le contrat publié continue de ne décrire que les cinq
+    routes réelles.
+    """
+    return RedirectResponse(url="/docs")
 
 
 @app.get(

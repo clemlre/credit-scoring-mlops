@@ -436,3 +436,19 @@ class TestJournalisationDesPredictions:
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
         assert response.json()["prediction_log"]["database"] == "unavailable"
+
+
+def test_racine_redirige_vers_la_documentation(client):
+    """La racine ne doit pas répondre 404 : c'est la porte d'entrée du service déployé."""
+    reponse = client.get("/", follow_redirects=False)
+    assert reponse.status_code in (302, 307)
+    assert reponse.headers["location"] == "/docs"
+
+
+def test_racine_absente_du_contrat_publie(client):
+    """La redirection est un confort de navigation, pas un point d'entrée métier."""
+    schema = client.get("/openapi.json").json()
+    assert "/" not in schema["paths"]
+    assert set(schema["paths"]) == {
+        "/health", "/model/info", "/features", "/predict", "/predict/batch",
+    }
