@@ -232,14 +232,21 @@ jobs:
         run: |
           git config user.email "ci@users.noreply.github.com"
           git config user.name "CI"
-          # `-A` enregistre aussi la suppression des captures faite à l'étape
-          # précédente ; sans lui, elles repartiraient dans la poussée.
+
+          # Le Space reçoit un **instantané**, pas l'historique du dépôt. Deux raisons.
+          # D'abord Hugging Face inspecte tout l'historique poussé et refuse le moindre
+          # blob binaire : supprimer les captures d'écran dans le dernier commit ne
+          # suffit pas, elles restent dans les commits qui les ont ajoutées. Ensuite le
+          # Space n'a aucun usage de l'historique GitHub — il lui faut de quoi bâtir une
+          # image, pas de quoi faire de l'archéologie.
+          git checkout --orphan deploiement
           git add -A
-          git commit -m "chore: configuration du Space"
+          git commit -m "Deploiement automatique depuis ${GITHUB_REPOSITORY}@${GITHUB_SHA}"
+
           # Le jeton passe par l'URL distante, jamais par un fichier du dépôt, et
           # n'apparaît pas dans les journaux (GitHub masque la valeur du secret).
           git remote add space "https://oauth2:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}"
-          git push --force space HEAD:main
+          git push --force space deploiement:main
 
       - name: Vérifier le service déployé
         if: steps.verif.outputs.configure == 'true'
