@@ -477,3 +477,32 @@ def test_exemple_swagger_de_predict_batch_est_executable(client):
     reponse = client.post("/predict/batch", json=exemple)
     assert reponse.status_code == 200, reponse.json()
     assert len(reponse.json()["predictions"]) == len(exemple["items"])
+
+
+@pytest.mark.parametrize(
+    ("nom", "decision_attendue"),
+    [("refuse", "rejected"), ("accepte", "accepted")],
+)
+def test_exemples_nommes_de_swagger_rendent_la_decision_annoncee(
+    client, nom, decision_attendue
+):
+    """Chaque exemple du sélecteur doit produire la décision que sa description promet.
+
+    Vérifier le seul code 200 ne suffirait pas : un exemple « accepté » qui finirait
+    par être refusé rendrait la documentation trompeuse sans rien casser.
+    """
+    schema = client.get("/openapi.json").json()
+    exemples = schema["paths"]["/predict"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["examples"]
+    assert nom in exemples, f"exemple « {nom} » absent du contrat publié"
+
+    reponse = client.post("/predict", json=exemples[nom]["value"])
+    assert reponse.status_code == 200, reponse.json()
+    corps = reponse.json()
+    assert corps["decision"] == decision_attendue
+    # La décision doit découler du seuil, pas d'un hasard de sérialisation.
+    if decision_attendue == "accepted":
+        assert corps["probability"] < corps["threshold"]
+    else:
+        assert corps["probability"] >= corps["threshold"]

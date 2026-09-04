@@ -18,13 +18,14 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from api import config
 from api.model import ModelLoadError, Prediction, ScoringModel
 from api.schemas import (
+    EXEMPLES_PREDICT,
     BatchPredictionRequest,
     BatchPredictionResponse,
     CoverageInfo,
@@ -399,7 +400,7 @@ def features(model: ModelDependency) -> FeaturesResponse:
     },
 )
 def predict(
-    payload: PredictionRequest,
+    payload: Annotated[PredictionRequest, Body(openapi_examples=EXEMPLES_PREDICT)],
     model: ModelDependency,
     request: Request,
     background: BackgroundTasks,

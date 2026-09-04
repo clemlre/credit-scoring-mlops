@@ -21,6 +21,19 @@ de 779 features agrégées sur son historique. La décision d'octroi se prend au
 documentation interactive Swagger. Le service est déployé par le pipeline à chaque
 poussée sur `main` ; les détails sont plus bas.
 
+Sur `POST /predict`, Swagger propose **deux exemples prêts à exécuter**, à choisir dans
+le menu déroulant *Examples* :
+
+| Exemple | Probabilité de défaut | Décision au seuil 0,10 |
+|---|---|---|
+| `refuse` — profil à risque | ≈ 0,245 | `rejected` |
+| `accepte` — profil solide | ≈ 0,006 | `accepted` |
+
+Les deux dossiers portent les mêmes 245 features et ne diffèrent que par vingt d'entre
+elles. L'écart tient pour l'essentiel aux trois scores externes `EXT_SOURCE_*`, qui
+concentrent la plus grosse part du gain du modèle : les relever suffit à faire basculer
+la décision, sans toucher au reste du dossier.
+
 ## État d'avancement
 
 | Étape | Contenu | Statut |

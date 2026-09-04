@@ -17,15 +17,51 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
 
-# L'exemple publié dans Swagger doit être **exécutable** : un « Try it out » sur la
-# documentation doit renvoyer 200, pas 422. Un extrait de huit features ne franchit
-# pas le plancher de complétude (50 % des features de dossier), donc l'exemple porte
-# un dossier complet, généré depuis le contrat du modèle et versionné à côté.
-# `tests/test_api.py` vérifie qu'il reste accepté : sans ce test, la documentation
-# se périmerait en silence au premier changement de contrat.
-EXEMPLE_DOSSIER: dict[str, float] = json.loads(
-    (Path(__file__).parent / "exemple_dossier.json").read_text(encoding="utf-8")
-)
+
+# Les exemples publiés dans Swagger doivent être **exécutables** : un « Try it out »
+# sur la documentation doit renvoyer 200, pas 422. Un extrait de quelques features ne
+# franchit pas le plancher de complétude (50 % des features de dossier), donc chaque
+# exemple porte un dossier complet, généré depuis le contrat du modèle.
+#
+# Deux dossiers sont fournis, qui ne diffèrent que par vingt features : l'un est refusé,
+# l'autre accepté. Ils rendent la décision tangible dans la documentation elle-même —
+# le seuil de 0,10 cesse d'être une valeur abstraite dès qu'on voit les deux réponses.
+#
+# `tests/test_api.py` vérifie que chacun produit bien la décision annoncée. Sans ces
+# tests, la documentation se périmerait en silence au premier changement de contrat.
+def _charger_exemple(nom: str) -> dict[str, float]:
+    return json.loads((Path(__file__).parent / nom).read_text(encoding="utf-8"))
+
+
+EXEMPLE_DOSSIER_REFUSE: dict[str, float] = _charger_exemple("exemple_dossier_refuse.json")
+EXEMPLE_DOSSIER_ACCEPTE: dict[str, float] = _charger_exemple("exemple_dossier_accepte.json")
+
+# L'exemple par défaut du schéma reste le dossier refusé : il montre à la fois une
+# réponse valide et le fonctionnement du seuil métier.
+EXEMPLE_DOSSIER = EXEMPLE_DOSSIER_REFUSE
+
+# Swagger affiche un sélecteur quand plusieurs exemples nommés sont fournis. Le dossier
+# refusé reste en tête, donc proposé par défaut.
+EXEMPLES_PREDICT: dict[str, dict] = {
+    "refuse": {
+        "summary": "Dossier refusé — profil à risque",
+        "description": (
+            "Scores externes bas et mensualité élevée au regard du revenu. "
+            "Probabilité attendue autour de 0,24 : au-dessus du seuil de 0,10, "
+            "la demande est refusée."
+        ),
+        "value": {"features": EXEMPLE_DOSSIER_REFUSE},
+    },
+    "accepte": {
+        "summary": "Dossier accepté — profil solide",
+        "description": (
+            "Mêmes 245 features, dont vingt modifiées : scores externes élevés, "
+            "ancienneté professionnelle, crédit plus léger. Probabilité attendue "
+            "autour de 0,006, soit quarante fois moins que le dossier refusé."
+        ),
+        "value": {"features": EXEMPLE_DOSSIER_ACCEPTE},
+    },
+}
 
 # Valeur d'une feature : un nombre, ou `null` pour « non renseignée ».
 # `allow_inf_nan=False` écarte Infinity et NaN, qui traverseraient JSON sans erreur
