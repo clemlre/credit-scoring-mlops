@@ -1,12 +1,7 @@
-"""Schémas d'entrée et de sortie de l'API (Pydantic).
+"""Schémas Pydantic de l'API.
 
-Ce sont eux qui rendent Swagger utile : chaque champ porte sa description et un
-exemple, et FastAPI en dérive la documentation interactive sur /docs.
-
-Choix de validation : les valeurs de features sont acceptées en **types stricts**
-(`int` ou `float` JSON), jamais en chaîne. Accepter `"0.5"` obligerait à décider
-comment lire `"0,5"`, et une locale mal devinée sur une variable de revenu produit
-un score faux sans le moindre message d'erreur. Une chaîne est donc rejetée en 422.
+Les valeurs de features sont en types stricts : "0.5" est rejeté plutôt que de
+deviner comment lire "0,5".
 """
 
 from __future__ import annotations
@@ -17,36 +12,45 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
 
-# L'exemple publié dans Swagger doit être **exécutable** : un « Try it out » sur la
-# documentation doit renvoyer 200, pas 422. Un extrait de huit features ne franchit
-# pas le plancher de complétude (50 % des features de dossier), donc l'exemple porte
-# un dossier complet, généré depuis le contrat du modèle et versionné à côté.
-# `tests/test_api.py` vérifie qu'il reste accepté : sans ce test, la documentation
-# se périmerait en silence au premier changement de contrat.
-EXEMPLE_DOSSIER: dict[str, float] = json.loads(
-    (Path(__file__).parent / "exemple_dossier.json").read_text(encoding="utf-8")
-)
 
-# Valeur d'une feature : un nombre, ou `null` pour « non renseignée ».
-# `allow_inf_nan=False` écarte Infinity et NaN, qui traverseraient JSON sans erreur
-# mais fausseraient les comparaisons de seuil dans les arbres.
+# Exemples Swagger complets (un "Try it out" doit renvoyer 200), vérifiés par
+# tests/test_api.py.
+def _load_example(name: str) -> dict[str, float]:
+    return json.loads((Path(__file__).parent / name).read_text(encoding="utf-8"))
+
+
+REJECTED_EXAMPLE: dict[str, float] = _load_example("exemple_dossier_refuse.json")
+ACCEPTED_EXAMPLE: dict[str, float] = _load_example("exemple_dossier_accepte.json")
+
+PREDICT_EXAMPLES: dict[str, dict] = {
+    "refuse": {
+        "summary": "Dossier refusé — profil à risque",
+        "description": (
+            "Scores externes bas et mensualité élevée au regard du revenu. "
+            "Probabilité attendue autour de 0,24 : au-dessus du seuil de 0,10, "
+            "la demande est refusée."
+        ),
+        "value": {"features": REJECTED_EXAMPLE},
+    },
+    "accepte": {
+        "summary": "Dossier accepté — profil solide",
+        "description": (
+            "Mêmes 245 features, dont vingt modifiées : scores externes élevés, "
+            "ancienneté professionnelle, crédit plus léger. Probabilité attendue "
+            "autour de 0,006, soit quarante fois moins que le dossier refusé."
+        ),
+        "value": {"features": ACCEPTED_EXAMPLE},
+    },
+}
+
+# Un nombre fini, ou null pour "non renseignée".
 FeatureValue = Annotated[StrictFloat | StrictInt, Field(allow_inf_nan=False)] | None
 
 
 class PredictionRequest(BaseModel):
     """Une demande de crédit à scorer."""
 
-    model_config = ConfigDict(
-        # `model_version` dans les réponses entre en collision avec l'espace de noms
-        # protégé `model_` de Pydantic ; on le libère explicitement.
-        protected_namespaces=(),
-        json_schema_extra={
-            "example": {"features": EXEMPLE_DOSSIER}
-        },
-    )
-
     features: dict[str, FeatureValue] = Field(
-        ...,
         description=(
             "Features du dossier, sous la forme nom → valeur. Les noms doivent "
             "appartenir au contrat du modèle (voir GET /features) ; un nom inconnu "
@@ -62,32 +66,26 @@ class BatchPredictionRequest(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {"items": [{"features": EXEMPLE_DOSSIER}]}
+            "example": {"items": [{"features": REJECTED_EXAMPLE}]}
         }
     )
 
     items: list[PredictionRequest] = Field(
-        ...,
         min_length=1,
-        description="Liste des demandes à scorer. Le nombre maximum est exposé par GET /model/info.",
+        description="Demandes à scorer. Le nombre maximum est exposé par GET /model/info.",
     )
 
 
 class CoverageInfo(BaseModel):
-    """Sur quelle quantité d'information la prédiction a été calculée.
+    """Quantité d'information sur laquelle repose la prédiction."""
 
-    Exposé dans chaque réponse pour que l'appelant sache lire le score : une
-    probabilité calculée sur un dossier à moitié vide n'a pas le même poids qu'une
-    probabilité calculée sur un dossier complet.
-    """
-
-    features_provided: int = Field(..., description="Nombre de features renseignées.")
-    features_missing: int = Field(..., description="Nombre de features laissées manquantes.")
+    features_provided: int = Field(description="Nombre de features renseignées.")
+    features_missing: int = Field(description="Nombre de features laissées manquantes.")
     application_ratio: float = Field(
-        ..., description="Part des features du dossier de demande qui sont renseignées (0 à 1)."
+        description="Part des features du dossier de demande qui sont renseignées (0 à 1)."
     )
     history_ratio: float = Field(
-        ..., description="Part des agrégats d'historique de crédit renseignés (0 à 1)."
+        description="Part des agrégats d'historique de crédit renseignés (0 à 1)."
     )
 
 
@@ -113,26 +111,23 @@ class PredictionResponse(BaseModel):
     )
 
     probability: float = Field(
-        ...,
         ge=0.0,
         le=1.0,
         description="Probabilité estimée que le client fasse défaut.",
     )
     decision: Literal["accepted", "rejected"] = Field(
-        ...,
         description=(
             "Décision d'octroi obtenue en comparant la probabilité au seuil métier. "
             "`rejected` dès que la probabilité atteint le seuil."
         ),
     )
     threshold: float = Field(
-        ...,
         description=(
             "Seuil de décision appliqué. Il vaut 0,10 et non 0,5 : le coût métier "
             "pénalise un mauvais client accepté dix fois plus qu'un bon client refusé."
         ),
     )
-    model_version: str = Field(..., description="Version du modèle ayant produit le score.")
+    model_version: str = Field(description="Version du modèle ayant produit le score.")
     coverage: CoverageInfo
 
 
@@ -144,10 +139,9 @@ class PredictionLogStatus(BaseModel):
     """État du journal des prédictions, exposé pour la supervision."""
 
     stdout: bool = Field(
-        ..., description="Le flux JSON des prédictions sur la sortie standard est actif."
+        description="Le flux JSON des prédictions sur la sortie standard est actif."
     )
     database: Literal["ready", "disabled", "unavailable"] = Field(
-        ...,
         description=(
             "État du stockage PostgreSQL. `disabled` : aucune base configurée "
             "(`DATABASE_URL` absent), ce qui est un mode de fonctionnement normal. "
@@ -194,8 +188,7 @@ class ModelInfoResponse(BaseModel):
     n_trees: int
     metrics: dict[str, float]
     min_application_coverage: float = Field(
-        ...,
-        description="Part minimale du dossier de demande exigée pour qu'une prédiction soit rendue.",
+        description="Part minimale du dossier de demande exigée pour rendre une prédiction.",
     )
     max_batch_size: int
 
@@ -205,10 +198,9 @@ class FeaturesResponse(BaseModel):
 
     n_features: int
     application_features: list[str] = Field(
-        ..., description="Features issues du dossier de demande lui-même."
+        description="Features issues du dossier de demande lui-même."
     )
     history_features: list[str] = Field(
-        ...,
         description=(
             "Agrégats de l'historique de crédit (bureau, demandes précédentes, "
             "échéanciers). Légitimement absents pour un primo-emprunteur."
@@ -219,4 +211,4 @@ class FeaturesResponse(BaseModel):
 class ErrorResponse(BaseModel):
     """Corps renvoyé pour toute erreur gérée."""
 
-    detail: str = Field(..., description="Message expliquant la cause du refus.")
+    detail: str = Field(description="Message expliquant la cause du refus.")

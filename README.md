@@ -15,6 +15,25 @@ de 779 features agrégées sur son historique. La décision d'octroi se prend au
 0,10** (et non 0,5), parce que la métrique métier pénalise un mauvais client accepté
 **10 fois** plus qu'un bon client refusé.
 
+## L'API en service
+
+**<https://clemlre-credit-scoring-api.hf.space>** — la racine renvoie vers la
+documentation interactive Swagger. Le service est déployé par le pipeline à chaque
+poussée sur `main` ; les détails sont plus bas.
+
+Sur `POST /predict`, Swagger propose **deux exemples prêts à exécuter**, à choisir dans
+le menu déroulant *Examples* :
+
+| Exemple | Probabilité de défaut | Décision au seuil 0,10 |
+|---|---|---|
+| `refuse` — profil à risque | ≈ 0,245 | `rejected` |
+| `accepte` — profil solide | ≈ 0,006 | `accepted` |
+
+Les deux dossiers portent les mêmes 245 features et ne diffèrent que par vingt d'entre
+elles. L'écart tient pour l'essentiel aux trois scores externes `EXT_SOURCE_*`, qui
+concentrent la plus grosse part du gain du modèle : les relever suffit à faire basculer
+la décision, sans toucher au reste du dossier.
+
 ## État d'avancement
 
 | Étape | Contenu | Statut |
@@ -255,6 +274,12 @@ L'analyse de la dérive des données est dans
 [`notebooks/07_data_drift.ipynb`](notebooks/07_data_drift.ipynb) : comparaison du trafic
 de production au jeu d'entraînement, démonstration de la détection sur une dérive
 provoquée, métriques opérationnelles et points de vigilance.
+
+Les captures de la solution de stockage sont dans
+[`docs/screenshots/`](docs/screenshots/) et décrites dans
+[`docs/monitoring.md`](docs/monitoring.md) : arborescence de la base, structure de la
+table, lignes réellement journalisées avec le contenu du champ `jsonb`, agrégation de
+suivi par minute, et état de l'infrastructure.
 
 ## Conventions de travail
 
