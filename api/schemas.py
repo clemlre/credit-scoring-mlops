@@ -11,9 +11,21 @@ un score faux sans le moindre message d'erreur. Une chaîne est donc rejetée en
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
+
+# L'exemple publié dans Swagger doit être **exécutable** : un « Try it out » sur la
+# documentation doit renvoyer 200, pas 422. Un extrait de huit features ne franchit
+# pas le plancher de complétude (50 % des features de dossier), donc l'exemple porte
+# un dossier complet, généré depuis le contrat du modèle et versionné à côté.
+# `tests/test_api.py` vérifie qu'il reste accepté : sans ce test, la documentation
+# se périmerait en silence au premier changement de contrat.
+EXEMPLE_DOSSIER: dict[str, float] = json.loads(
+    (Path(__file__).parent / "exemple_dossier.json").read_text(encoding="utf-8")
+)
 
 # Valeur d'une feature : un nombre, ou `null` pour « non renseignée ».
 # `allow_inf_nan=False` écarte Infinity et NaN, qui traverseraient JSON sans erreur
@@ -29,18 +41,7 @@ class PredictionRequest(BaseModel):
         # protégé `model_` de Pydantic ; on le libère explicitement.
         protected_namespaces=(),
         json_schema_extra={
-            "example": {
-                "features": {
-                    "AMT_INCOME_TOTAL": 202500.0,
-                    "AMT_CREDIT": 406597.5,
-                    "AMT_ANNUITY": 24700.5,
-                    "DAYS_BIRTH": -9461,
-                    "DAYS_EMPLOYED": -637,
-                    "EXT_SOURCE_2": 0.2629,
-                    "EXT_SOURCE_3": 0.1394,
-                    "PAYMENT_RATE": 0.0607,
-                }
-            }
+            "example": {"features": EXEMPLE_DOSSIER}
         },
     )
 
@@ -61,12 +62,7 @@ class BatchPredictionRequest(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
-                "items": [
-                    {"features": {"AMT_INCOME_TOTAL": 202500.0, "EXT_SOURCE_2": 0.2629}},
-                    {"features": {"AMT_INCOME_TOTAL": 99000.0, "EXT_SOURCE_2": 0.6222}},
-                ]
-            }
+            "example": {"items": [{"features": EXEMPLE_DOSSIER}]}
         }
     )
 
