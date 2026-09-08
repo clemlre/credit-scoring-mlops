@@ -1,9 +1,4 @@
-"""Tests des routes HTTP : contrat, documentation, erreurs.
-
-L'objectif n'est pas de retester le modèle (c'est le rôle de `test_model.py`) mais
-de vérifier que l'API traduit correctement chaque situation en code de statut et en
-message exploitable par l'appelant.
-"""
+"""Tests des routes HTTP : contrat, documentation, gestion des erreurs."""
 
 from __future__ import annotations
 
@@ -168,10 +163,7 @@ class TestGestionDesErreurs:
 
     @pytest.mark.parametrize("litteral", ["Infinity", "-Infinity", "NaN"])
     def test_les_valeurs_non_finies_sont_refusees(self, client, valid_features, litteral):
-        """`Infinity` et `NaN` ne font pas partie du JSON standard, mais le parseur de
-        Python les accepte : ils franchiraient donc la couche transport sans bruit et
-        fausseraient les comparaisons de seuil dans les arbres. On les envoie ici en
-        contenu brut, car le client HTTP refuse lui-même de les sérialiser."""
+        """Hors JSON standard mais acceptés par le parseur Python : envoyés en brut."""
         import json
 
         payload = {**valid_features, "AMT_CREDIT": 0.0}
@@ -260,9 +252,7 @@ class TestErreurInterne:
 
         monkeypatch.setattr(app.state.model, "predict", exploser)
 
-        # Pas de `with` ici : ouvrir un second contexte relancerait le `lifespan` et,
-        # en le refermant, viderait le modèle chargé pour toute la session de test.
-        # L'application est déjà démarrée par la fixture `client`.
+        # Sans `with` : un second lifespan viderait le modèle de la session de test.
         client_brut = TestClient(app, raise_server_exceptions=False)
         response = client_brut.post("/predict", json={"features": valid_features})
 
@@ -315,12 +305,7 @@ class TestPredictionParLot:
 
 
 class TestJournalisationDesPredictions:
-    """Ce que l'API promet côté monitoring, vérifié depuis l'extérieur.
-
-    Ces tests ne touchent pas à PostgreSQL : ils vérifient le **contrat HTTP** et
-    l'invariant « le monitoring ne casse jamais une prédiction ». La validité du
-    SQL est couverte séparément, dans `test_storage.py`.
-    """
+    """Contrat HTTP de la journalisation ; le SQL est testé dans test_storage.py."""
 
     @pytest.fixture
     def journal_espion(self, client):
@@ -330,9 +315,13 @@ class TestJournalisationDesPredictions:
         class Espion:
             def __init__(self):
                 self.recus = []
+                self.requetes = []
 
             def record(self, records):
                 self.recus.extend(records)
+
+            def record_request(self, record):
+                self.requetes.append(record)
 
             def status(self):
                 return {"stdout": True, "database": "ready", "last_error": None}
@@ -380,14 +369,52 @@ class TestJournalisationDesPredictions:
         assert len(journal_espion.recus) == 3
         assert {r.endpoint for r in journal_espion.recus} == {"/predict/batch"}
 
-    def test_une_requete_refusee_n_est_pas_journalisee(
+    def test_une_requete_refusee_ne_produit_pas_de_prediction(
         self, client, sparse_features, journal_espion
     ):
-        """Seules les prédictions réellement rendues entrent au journal : une 422
-        n'a produit aucun score à surveiller."""
         response = client.post("/predict", json={"features": sparse_features})
         assert response.status_code == 422
         assert journal_espion.recus == []
+
+    def test_chaque_appel_est_journalise_avec_son_statut(
+        self, client, valid_features, sparse_features, journal_espion
+    ):
+        ok = client.post("/predict", json={"features": valid_features})
+        refus = client.post("/predict", json={"features": sparse_features})
+
+        assert [(r.path, r.status_code) for r in journal_espion.requetes] == [
+            ("/predict", 200),
+            ("/predict", 422),
+        ]
+        assert journal_espion.requetes[0].request_id == ok.headers["X-Request-ID"]
+        assert journal_espion.requetes[1].request_id == refus.headers["X-Request-ID"]
+        assert all(r.duration_ms > 0 for r in journal_espion.requetes)
+
+    def test_la_duree_de_requete_englobe_l_inference(self, client, valid_features, journal_espion):
+        client.post("/predict", json={"features": valid_features})
+        assert journal_espion.requetes[0].duration_ms >= journal_espion.recus[0].latency_ms
+
+    def test_la_sonde_health_n_est_pas_journalisee(self, client, journal_espion):
+        client.get("/health")
+        client.get("/docs")
+        assert journal_espion.requetes == []
+
+    def test_une_erreur_interne_est_journalisee_en_500(
+        self, client, valid_features, journal_espion, monkeypatch
+    ):
+        from fastapi.testclient import TestClient
+
+        from api.main import app
+
+        def exploser(_rows):
+            raise RuntimeError("panne simulée")
+
+        monkeypatch.setattr(app.state.model, "predict", exploser)
+        TestClient(app, raise_server_exceptions=False).post(
+            "/predict", json={"features": valid_features}
+        )
+
+        assert [(r.path, r.status_code) for r in journal_espion.requetes] == [("/predict", 500)]
 
     def test_une_panne_du_journal_ne_casse_pas_la_prediction(self, client, valid_features):
         """L'invariant central. Le score doit être rendu même si la journalisation
@@ -396,6 +423,9 @@ class TestJournalisationDesPredictions:
 
         class JournalEnPanne:
             def record(self, records):
+                raise RuntimeError("panne de journalisation simulée")
+
+            def record_request(self, record):
                 raise RuntimeError("panne de journalisation simulée")
 
             def status(self):
@@ -455,12 +485,7 @@ def test_racine_absente_du_contrat_publie(client):
 
 
 def test_exemple_swagger_de_predict_est_executable(client):
-    """L'exemple publié dans la documentation doit renvoyer 200, pas 422.
-
-    Sans ce test, un « Try it out » sur /docs échoue en silence : c'est exactement
-    ce qui s'est produit avec l'extrait de huit features, trop incomplet pour
-    franchir le plancher de complétude du dossier.
-    """
+    """Un « Try it out » sur /docs doit renvoyer 200, pas 422."""
     schema = client.get("/openapi.json").json()
     exemple = schema["components"]["schemas"]["PredictionRequest"]["example"]
     reponse = client.post("/predict", json=exemple)
@@ -486,11 +511,7 @@ def test_exemple_swagger_de_predict_batch_est_executable(client):
 def test_exemples_nommes_de_swagger_rendent_la_decision_annoncee(
     client, nom, decision_attendue
 ):
-    """Chaque exemple du sélecteur doit produire la décision que sa description promet.
-
-    Vérifier le seul code 200 ne suffirait pas : un exemple « accepté » qui finirait
-    par être refusé rendrait la documentation trompeuse sans rien casser.
-    """
+    """Chaque exemple doit produire la décision annoncée par sa description."""
     schema = client.get("/openapi.json").json()
     exemples = schema["paths"]["/predict"]["post"]["requestBody"]["content"][
         "application/json"

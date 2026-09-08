@@ -1,37 +1,13 @@
-"""Journalisation des prédictions rendues en production.
+"""Journalisation de production : prédictions et requêtes HTTP.
 
-Sans cette brique, une fois l'API déployée, plus personne ne sait ce que le modèle
-a réellement répondu : ni pour enquêter sur une réclamation client, ni pour mesurer
-la dérive des données. C'est la matière première du monitoring.
+Deux canaux :
+- stdout, une ligne JSON par événement, sans aucune valeur de feature ;
+- PostgreSQL (si DATABASE_URL est défini) : table `predictions`, avec les features
+  en JSONB pour l'analyse de dérive, et table `requests` (statut et durée de chaque
+  appel, erreurs comprises).
 
-Deux canaux, délibérément distincts
------------------------------------
-
-1. **Sortie standard, au format JSON, une ligne par prédiction.** Toujours active,
-   sans dépendance ni configuration. Dans un conteneur, `stdout` *est* le transport
-   de journaux : Docker, Kubernetes et Hugging Face Spaces le collectent d'office.
-   Ce canal ne contient **aucune valeur de feature** — seulement le score, la
-   décision et des métadonnées. Les journaux applicatifs finissent souvent chez un
-   tiers (Datadog, CloudWatch…) : les revenus et l'âge d'un demandeur de crédit
-   n'ont rien à y faire.
-
-2. **PostgreSQL.** Reçoit en plus les features de la requête, en `JSONB`. C'est la
-   base interrogeable qui alimente l'analyse de data drift et le tableau de bord de
-   monitoring. Elle reste sous le contrôle de « Prêt à Dépenser ».
-
-Trois invariants
-----------------
-
-- **Le monitoring ne casse jamais une prédiction.** L'écriture en base a lieu
-  *après* l'envoi de la réponse (`BackgroundTasks`) et toute exception y est
-  absorbée. Une base indisponible dégrade l'observabilité, elle n'interrompt pas
-  le service de scoring.
-- **Le pool de connexions est ouvert une seule fois** au démarrage, comme le
-  modèle. Ouvrir une connexion PostgreSQL par requête coûterait plus cher que
-  l'inférence elle-même.
-- **Une base absente est un mode de fonctionnement normal**, pas une panne :
-  sans `DATABASE_URL`, seul le canal `stdout` fonctionne. C'est le cas en test,
-  en CI et pour un simple `docker run` de démonstration.
+Une panne de la base ne doit jamais faire échouer une prédiction : les écritures
+ont lieu après la réponse et toutes les erreurs sont absorbées.
 """
 
 from __future__ import annotations
@@ -48,10 +24,8 @@ from api import config
 
 logger = logging.getLogger("api")
 
-# Nom de table volontairement constant, et non paramétrable par l'environnement :
-# il est interpolé dans du SQL, et une valeur venue de l'extérieur y ouvrirait une
-# injection pour ne rendre service à personne.
 TABLE = "predictions"
+REQUESTS_TABLE = "requests"
 
 SCHEMA_SQL = f"""
 CREATE TABLE IF NOT EXISTS {TABLE} (
@@ -70,13 +44,22 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
     latency_ms        DOUBLE PRECISION NOT NULL,
     features          JSONB       NOT NULL
 );
-
--- Le monitoring interroge presque toujours « les N derniers jours », et souvent
--- pour une version de modèle donnée (comparer avant/après un déploiement).
 CREATE INDEX IF NOT EXISTS {TABLE}_occurred_at_idx
     ON {TABLE} (occurred_at DESC);
 CREATE INDEX IF NOT EXISTS {TABLE}_model_version_idx
     ON {TABLE} (model_version, occurred_at DESC);
+
+CREATE TABLE IF NOT EXISTS {REQUESTS_TABLE} (
+    id          BIGSERIAL   PRIMARY KEY,
+    request_id  UUID        NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    method      TEXT        NOT NULL,
+    path        TEXT        NOT NULL,
+    status_code INTEGER     NOT NULL,
+    duration_ms DOUBLE PRECISION NOT NULL
+);
+CREATE INDEX IF NOT EXISTS {REQUESTS_TABLE}_occurred_at_idx
+    ON {REQUESTS_TABLE} (occurred_at DESC);
 """
 
 INSERT_SQL = f"""
@@ -87,16 +70,15 @@ INSERT INTO {TABLE} (
 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
+INSERT_REQUEST_SQL = f"""
+INSERT INTO {REQUESTS_TABLE} (
+    request_id, occurred_at, method, path, status_code, duration_ms
+) VALUES (%s, %s, %s, %s, %s, %s)
+"""
+
 
 @dataclass(frozen=True)
 class PredictionRecord:
-    """Une prédiction rendue, telle qu'on veut pouvoir la relire des mois plus tard.
-
-    On stocke la **couverture** et la **latence** en plus du score : sans elles, un
-    écart constaté a posteriori est indiagnosticable (le modèle a-t-il dérivé, ou
-    bien les appelants ont-ils commencé à envoyer des dossiers plus incomplets ?).
-    """
-
     request_id: str
     occurred_at: datetime
     endpoint: str
@@ -112,7 +94,7 @@ class PredictionRecord:
     features: dict[str, Any]
 
     def summary(self) -> dict[str, Any]:
-        """Vue sans aucune valeur de feature, destinée au canal `stdout`."""
+        """Version sans features, pour stdout."""
         return {
             "event": "prediction",
             "request_id": self.request_id,
@@ -130,7 +112,6 @@ class PredictionRecord:
         }
 
     def row(self) -> tuple:
-        """Les paramètres de l'insertion, dans l'ordre de `INSERT_SQL`."""
         from psycopg.types.json import Jsonb
 
         return (
@@ -150,16 +131,39 @@ class PredictionRecord:
         )
 
 
-class _StdoutHandler(logging.StreamHandler):
-    """Handler qui résout `sys.stdout` **à l'émission**, pas à la construction.
+@dataclass(frozen=True)
+class RequestRecord:
+    request_id: str
+    occurred_at: datetime
+    method: str
+    path: str
+    status_code: int
+    duration_ms: float
 
-    `logging.StreamHandler(sys.stdout)` capture le flux une fois pour toutes. Le
-    handler continue alors d'écrire dans l'objet d'origine même si `sys.stdout` a
-    été remplacé depuis — ce qui arrive dès qu'on redirige la sortie : capture de
-    tests, `contextlib.redirect_stdout`, ou un superviseur qui réouvre le flux.
-    Résoudre à l'émission rend le canal fidèle à ce qui se passe réellement sur la
-    sortie standard du processus.
-    """
+    def summary(self) -> dict[str, Any]:
+        return {
+            "event": "request",
+            "request_id": self.request_id,
+            "occurred_at": self.occurred_at.isoformat(),
+            "method": self.method,
+            "path": self.path,
+            "status_code": self.status_code,
+            "duration_ms": round(self.duration_ms, 3),
+        }
+
+    def row(self) -> tuple:
+        return (
+            self.request_id,
+            self.occurred_at,
+            self.method,
+            self.path,
+            self.status_code,
+            self.duration_ms,
+        )
+
+
+class _StdoutHandler(logging.StreamHandler):
+    """Résout sys.stdout à chaque émission (compatible avec la capture de pytest)."""
 
     @property
     def stream(self):
@@ -167,18 +171,10 @@ class _StdoutHandler(logging.StreamHandler):
 
     @stream.setter
     def stream(self, _value):
-        # `StreamHandler.__init__` affecte `self.stream` : on ignore l'affectation,
-        # la propriété fait autorité.
         pass
 
 
 def _stdout_channel() -> logging.Logger:
-    """Le flux de prédictions, séparé du journal applicatif.
-
-    `propagate = False` l'isole du logger d'uvicorn : les lignes sortent en JSON
-    brut, sans préfixe de niveau ni horodatage ajouté, pour qu'un collecteur puisse
-    les parser sans expression régulière.
-    """
     channel = logging.getLogger("api.predictions")
     if not channel.handlers:
         handler = _StdoutHandler()
@@ -190,8 +186,6 @@ def _stdout_channel() -> logging.Logger:
 
 
 class PredictionLog:
-    """Journal des prédictions : `stdout` toujours, PostgreSQL si configuré."""
-
     def __init__(self, dsn: str | None = None):
         self._dsn = dsn
         self._pool = None
@@ -199,24 +193,16 @@ class PredictionLog:
         self._channel = _stdout_channel()
         self.last_error: str | None = None
 
-    # --- Cycle de vie ---
-
     def open(self) -> None:
-        """Ouvre le pool de connexions. Ne lève jamais : au pire, on reste en `stdout`."""
+        """Ouvre le pool de connexions. Ne lève jamais."""
         if not self._dsn:
-            logger.info(
-                "Journal des prédictions : sortie standard uniquement "
-                "(DATABASE_URL non défini)."
-            )
+            logger.info("Journal des prédictions : stdout uniquement (DATABASE_URL non défini).")
             return
 
         try:
             from psycopg_pool import ConnectionPool
 
-            # `open=False` puis `open(wait=False)` : le démarrage de l'API ne doit pas
-            # dépendre de la disponibilité de la base. Si PostgreSQL démarre plus
-            # lentement que l'API — le cas normal avec docker compose — le pool se
-            # connectera tout seul, sans que le service ait échoué entre-temps.
+            # open(wait=False) : l'API démarre même si PostgreSQL n'est pas encore prêt.
             self._pool = ConnectionPool(
                 self._dsn,
                 min_size=config.DB_POOL_MIN_SIZE,
@@ -225,22 +211,19 @@ class PredictionLog:
                 open=False,
             )
             self._pool.open(wait=False)
-        except Exception as exc:  # noqa: BLE001 - aucune panne d'infra ne doit empêcher l'API de démarrer
+        except Exception as exc:  # noqa: BLE001
             self._pool = None
             self.last_error = _describe(exc)
             logger.error("Journal des prédictions : pool inutilisable — %s", self.last_error)
             return
 
-        # Tentative immédiate de création du schéma, pour que /health dise la vérité
-        # dès le démarrage. Un échec ici n'est pas fatal : il sera retenté à la
-        # première écriture.
         try:
             self._prepare_schema()
-        except Exception as exc:  # noqa: BLE001 - base pas encore prête : ce n'est pas une erreur fatale
+        except Exception as exc:  # noqa: BLE001
             self.last_error = _describe(exc)
             logger.warning(
-                "Journal des prédictions : base pas encore joignable, "
-                "nouvelle tentative à la première prédiction — %s",
+                "Journal des prédictions : base injoignable, nouvel essai à la première "
+                "écriture — %s",
                 self.last_error,
             )
 
@@ -250,19 +233,12 @@ class PredictionLog:
             self._pool = None
         self._schema_ready = False
 
-    # --- État, pour /health ---
-
     @property
     def database_enabled(self) -> bool:
         return self._pool is not None
 
     def status(self) -> dict[str, Any]:
-        """État connu du journal, **sans aller interroger la base**.
-
-        Une sonde de disponibilité est appelée toutes les 30 secondes : y glisser un
-        aller-retour SQL la rendrait lente et sensible à un pic de charge de la base.
-        On rapporte donc le dernier état constaté lors d'une écriture réelle.
-        """
+        """Dernier état connu, sans requête SQL (appelé par /health)."""
         if not self.database_enabled:
             etat = "disabled"
         elif self._schema_ready and self.last_error is None:
@@ -271,15 +247,15 @@ class PredictionLog:
             etat = "unavailable"
         return {"stdout": True, "database": etat, "last_error": self.last_error}
 
-    # --- Écriture ---
-
     def record(self, records: Sequence[PredictionRecord]) -> None:
-        """Journalise un lot de prédictions. **Ne lève jamais.**
+        """Journalise un lot de prédictions. Ne lève jamais."""
+        self._record(INSERT_SQL, records)
 
-        Appelée depuis une tâche d'arrière-plan, donc après que la réponse HTTP est
-        partie. Une exception qui remonterait d'ici serait un incident de monitoring
-        transformé en incident de production : c'est précisément ce qu'on refuse.
-        """
+    def record_request(self, record: RequestRecord) -> None:
+        """Journalise une requête HTTP. Ne lève jamais."""
+        self._record(INSERT_REQUEST_SQL, [record])
+
+    def _record(self, sql: str, records: Sequence[PredictionRecord | RequestRecord]) -> None:
         if not records:
             return
 
@@ -290,29 +266,23 @@ class PredictionLog:
             return
 
         try:
-            self._write(records)
+            self._write(sql, records)
             self.last_error = None
-        except Exception as exc:  # noqa: BLE001 - voir le commentaire ci-dessous
-            # `except Exception` large et assumé : aucune défaillance de la couche de
-            # stockage — réseau, schéma, disque plein, mot de passe changé — ne doit
-            # se propager. La perte est signalée dans les journaux applicatifs, et la
-            # ligne JSON de `stdout` reste, elle, écrite.
+        except Exception as exc:  # noqa: BLE001
             self.last_error = _describe(exc)
             logger.warning(
-                "Journal des prédictions : %d prédiction(s) non stockée(s) en base — %s",
+                "Journal de production : %d ligne(s) non stockée(s) — %s",
                 len(records),
                 self.last_error,
             )
 
-    def _write(self, records: Sequence[PredictionRecord]) -> None:
+    def _write(self, sql: str, records: Sequence[PredictionRecord | RequestRecord]) -> None:
         with self._pool.connection(timeout=config.DB_WRITE_TIMEOUT) as conn:
             if not self._schema_ready:
                 conn.execute(SCHEMA_SQL)
                 self._schema_ready = True
             with conn.cursor() as cur:
-                # `executemany` pour un lot : un aller-retour par ligne annulerait
-                # l'intérêt d'avoir vectorisé l'inférence sur tout le lot.
-                cur.executemany(INSERT_SQL, [r.row() for r in records])
+                cur.executemany(sql, [r.row() for r in records])
 
     def _prepare_schema(self) -> None:
         with self._pool.connection(timeout=config.DB_WRITE_TIMEOUT) as conn:
@@ -322,11 +292,7 @@ class PredictionLog:
 
 
 def _describe(exc: BaseException) -> str:
-    """Message d'erreur court, sans jamais recopier la chaîne de connexion.
-
-    `DATABASE_URL` contient un mot de passe : il ne doit apparaître ni dans les
-    journaux, ni dans une réponse HTTP.
-    """
+    """Message court et borné, pour ne jamais recopier la chaîne de connexion."""
     message = str(exc).strip().splitlines()[0] if str(exc).strip() else exc.__class__.__name__
     return f"{exc.__class__.__name__}: {message}"[:300]
 
@@ -343,7 +309,6 @@ def build_record(
     threshold: float,
     latency_ms: float,
 ) -> PredictionRecord:
-    """Assemble un enregistrement à partir d'une prédiction rendue."""
     return PredictionRecord(
         request_id=request_id,
         occurred_at=datetime.now(UTC),
@@ -357,8 +322,6 @@ def build_record(
         application_ratio=coverage.application_ratio,
         history_ratio=coverage.history_ratio,
         latency_ms=latency_ms,
-        # On stocke le payload **tel que reçu**, pas la ligne complétée à 779
-        # colonnes : c'est ce que l'appelant a réellement envoyé, et c'est la seule
-        # version qui reste interprétable si le contrat de features change.
+        # Payload tel que reçu, pas la ligne complétée à 779 colonnes.
         features=dict(features),
     )
