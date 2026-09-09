@@ -1,4 +1,4 @@
-# Suivi en production : journalisation et stockage des prédictions
+# Suivi en production : journalisation et stockage
 
 Ce document décrit **ce que l'API enregistre**, **où**, **pourquoi ce choix**, et
 comment relire ces données. C'est la matière première de l'analyse de dérive
@@ -6,8 +6,9 @@ comment relire ces données. C'est la matière première de l'analyse de dérive
 
 ## Ce qui est enregistré
 
-À chaque prédiction rendue — et uniquement à celles-là, une requête refusée en 422
-n'ayant produit aucun score à surveiller :
+Deux tables, reliées par `request_id`.
+
+### `predictions` — une ligne par dossier scoré
 
 | Champ | Pourquoi il est là |
 |---|---|
@@ -18,8 +19,23 @@ n'ayant produit aucun score à surveiller :
 | `threshold` | Le seuil **appliqué ce jour-là**. S'il est un jour réajusté, l'historique reste interprétable. |
 | `probability`, `decision` | Le résultat lui-même. |
 | `features_provided`, `features_missing`, `application_ratio`, `history_ratio` | La **couverture** du dossier. Un taux de refus qui monte peut venir du modèle… ou d'appelants qui envoient des dossiers plus incomplets. Sans cette colonne, les deux causes sont indiscernables. |
-| `latency_ms` | Temps d'inférence. Base de référence pour l'étape d'optimisation. |
+| `latency_ms` | Temps d'**inférence** seul (construction de la matrice + modèle), hors validation et HTTP. Pour un lot, durée de l'appel divisée par le nombre de dossiers. |
 | `features` | Le payload **tel que reçu**, en `JSONB`. C'est ce qui rend la dérive mesurable. |
+
+### `requests` — une ligne par appel HTTP, erreurs comprises
+
+| Champ | Pourquoi il est là |
+|---|---|
+| `request_id` | Même identifiant que dans `predictions` et dans l'en-tête `X-Request-ID`. |
+| `occurred_at`, `method`, `path` | Quand, et sur quelle route. |
+| `status_code` | 200, 422 (entrée refusée), 500 (erreur interne), 503 (modèle absent). C'est ce qui donne le **taux d'erreur**. |
+| `duration_ms` | Temps de traitement **de la requête** côté serveur, mesuré par un middleware : validation + inférence + sérialisation. C'est la latence que perçoit l'appelant, hors réseau. |
+
+Routes suivies : `/predict`, `/predict/batch`, `/model/info`, `/features`. `/health` en
+est exclue : la sonde du conteneur l'appelle toutes les 30 s.
+
+Séparer les deux tables évite de mélanger deux grains : un appel `/predict/batch` de
+200 dossiers donne **une** ligne `requests` et **200** lignes `predictions`.
 
 ## Deux canaux, et pourquoi ils sont distincts
 
@@ -30,8 +46,8 @@ n'ayant produit aucun score à surveiller :
                                          │ BackgroundTasks (après la réponse)
                           ┌──────────────┴───────────────┐
                           ▼                              ▼
-             stdout, JSON par ligne            PostgreSQL (table predictions)
-             ─────────────────────             ──────────────────────────────
+             stdout, JSON par ligne            PostgreSQL (predictions, requests)
+             ─────────────────────             ──────────────────────────────────
              toujours actif                    si DATABASE_URL est défini
              SANS valeur de feature            AVEC les features, en JSONB
              exploitation / incidents          monitoring / dérive / audit
@@ -196,6 +212,35 @@ GROUP BY 1 ORDER BY 1;
 La relation est monotone, comme attendu : plus le score externe est bas, plus le
 modèle refuse. Une inversion de cette courbe serait un signal d'alerte fort.
 
+**Taux d'erreur et latence par route** (table `requests`)
+
+```sql
+SELECT path,
+       count(*)                                                        AS appels,
+       round(100.0 * count(*) FILTER (WHERE status_code >= 400) / count(*), 2)
+                                                                       AS taux_erreur_pct,
+       round(percentile_cont(0.5)  WITHIN GROUP (ORDER BY duration_ms)::numeric, 2) AS p50_ms,
+       round(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)::numeric, 2) AS p95_ms
+FROM requests
+WHERE occurred_at > now() - interval '1 day'
+GROUP BY path ORDER BY path;
+```
+
+Un taux d'erreur à 500 est un incident ; un taux de 422 qui monte signale plutôt un
+appelant qui a changé son format d'envoi.
+
+**Part de l'inférence dans le temps de requête** — la jointure sur `request_id` :
+
+```sql
+SELECT r.path,
+       round(avg(r.duration_ms)::numeric, 2)   AS requete_ms,
+       round(avg(p.latency_ms)::numeric, 2)    AS inference_ms
+FROM requests r
+JOIN (SELECT request_id, sum(latency_ms) AS latency_ms
+      FROM predictions GROUP BY request_id) p USING (request_id)
+GROUP BY r.path;
+```
+
 **Retrouver une décision contestée**
 
 ```sql
@@ -240,8 +285,6 @@ que de prendre la table entière. En production, les environnements seraient sé
 
 ## Ce qui n'est pas couvert (et pourquoi c'est assumé)
 
-- **Les requêtes refusées (422) ne sont pas journalisées.** Un taux de rejet en
-  hausse serait pourtant un signal utile — c'est la première extension à prévoir.
 - **Aucune purge automatique.** La rétention devra être décidée avec le métier
   (obligation de conservation d'une décision de crédit) puis appliquée par une
   tâche planifiée ou un partitionnement.
@@ -257,8 +300,8 @@ que de prendre la table entière. En production, les environnements seraient sé
 | Niveau | Fichier | Ce qui est garanti |
 |---|---|---|
 | Unitaire | `tests/test_storage.py` | Canaux alimentés, erreurs absorbées, schéma créé une seule fois, chaîne de connexion jamais divulguée. Avec un faux pool : **le SQL n'y est pas validé**. |
-| Unitaire (HTTP) | `tests/test_api.py::TestJournalisationDesPredictions` | En-tête `X-Request-ID`, journalisation effective, 422 non journalisée, panne du journal sans effet sur la réponse. |
-| Intégration | `tests/test_storage.py::TestIntegrationPostgres` | SQL réellement exécutable, index présents, `JSONB` relisible et agrégeable. |
+| Unitaire (HTTP) | `tests/test_api.py::TestJournalisationDesPredictions` | En-tête `X-Request-ID`, prédictions journalisées, chaque appel journalisé avec son statut (200, 422, 500), `/health` exclue, panne du journal sans effet sur la réponse. |
+| Intégration | `tests/test_storage.py::TestIntegrationPostgres` | SQL réellement exécutable pour les deux tables, index présents, `JSONB` relisible et agrégeable. |
 
 Les tests d'intégration sont ignorés sans `DATABASE_URL`. La CI en fournit un
 (service PostgreSQL éphémère) : ils **s'exécutent donc à chaque pipeline**.

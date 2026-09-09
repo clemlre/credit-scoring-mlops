@@ -1,17 +1,7 @@
 """Tests du journal des prédictions.
 
-Deux niveaux, volontairement séparés :
-
-- **Unitaires**, avec un faux pool de connexions. Ils vérifient la *logique* —
-  quels canaux sont alimentés, ce qui est absorbé, ce qui est écrit — sans exiger
-  de serveur PostgreSQL. C'est ce qui tourne partout, y compris sur un poste sans
-  Docker.
-- **D'intégration**, contre un vrai PostgreSQL, ignorés si `DATABASE_URL` n'est pas
-  défini. Eux seuls prouvent que le SQL est valide : un faux pool accepterait
-  n'importe quelle requête, y compris une requête syntaxiquement fausse.
-
-La distinction compte pour la soutenance : savoir *ce que la suite de tests ne
-garantit pas* vaut mieux qu'un chiffre de couverture élevé.
+Tests unitaires avec un faux pool, et tests d'intégration contre un vrai
+PostgreSQL (ignorés si DATABASE_URL n'est pas défini).
 """
 
 from __future__ import annotations
@@ -23,7 +13,13 @@ from contextlib import contextmanager
 import pytest
 
 from api import config
-from api.storage import PredictionLog, PredictionRecord, _describe, build_record
+from api.storage import (
+    PredictionLog,
+    PredictionRecord,
+    RequestRecord,
+    _describe,
+    build_record,
+)
 
 # --------------------------------------------------------------------------
 # Doublures
@@ -94,7 +90,61 @@ def record(model) -> PredictionRecord:
     )
 
 
+def requete(request_id="11111111-2222-3333-4444-555555555555", status_code=422):
+    from datetime import UTC, datetime
+
+    return RequestRecord(
+        request_id=request_id,
+        occurred_at=datetime.now(UTC),
+        method="POST",
+        path="/predict",
+        status_code=status_code,
+        duration_ms=3.5,
+    )
+
+
 # --------------------------------------------------------------------------
+
+
+class TestJournalDesRequetes:
+    def test_une_requete_est_tracee_sur_la_sortie_standard(self, capfd):
+        journal = PredictionLog(None)
+        journal.open()
+        journal.record_request(requete())
+
+        charge = json.loads(capfd.readouterr().out.strip())
+        assert charge["event"] == "request"
+        assert charge["status_code"] == 422
+        assert charge["path"] == "/predict"
+        assert charge["duration_ms"] == 3.5
+
+    def test_une_requete_part_dans_la_table_requests(self):
+        journal = PredictionLog("postgresql://simule")
+        journal._pool = FakePool()
+        enregistrement = requete()
+        journal.record_request(enregistrement)
+
+        sql, lignes = journal._pool.inserted[0]
+        assert "INSERT INTO requests" in sql
+        assert lignes == [enregistrement.row()]
+
+    def test_le_schema_cree_les_deux_tables(self):
+        journal = PredictionLog("postgresql://simule")
+        journal._pool = FakePool()
+        journal.record_request(requete())
+
+        schema = journal._pool.executed[0]
+        assert "CREATE TABLE IF NOT EXISTS predictions" in schema
+        assert "CREATE TABLE IF NOT EXISTS requests" in schema
+
+    def test_une_panne_de_base_est_absorbee(self, capfd):
+        journal = PredictionLog("postgresql://simule")
+        journal._pool = FakePool(fail_on="connect")
+
+        journal.record_request(requete())
+
+        assert journal.status()["database"] == "unavailable"
+        assert json.loads(capfd.readouterr().out.strip())["event"] == "request"
 
 
 class TestSansBaseDeDonnees:
@@ -250,16 +300,8 @@ class TestOuvertureReelleDuPool:
 
 
 class TestIntegrationPostgres:
-    """Contre un vrai PostgreSQL. Ignorés si `DATABASE_URL` n'est pas défini.
-
-    Ce sont les seuls tests qui prouvent que le SQL est correct : le faux pool des
-    tests unitaires accepterait une requête invalide sans broncher.
-
-    Chaque test travaille sur un `request_id` qui lui est propre et nettoie ses
-    lignes en sortant. Sans cette isolation, un test d'agrégation compterait aussi
-    les prédictions laissées par les exécutions précédentes — et passerait ou
-    échouerait selon l'historique de la base, ce qui est le pire des comportements.
-    """
+    """Contre un vrai PostgreSQL. Chaque test utilise son propre request_id et
+    efface ses lignes, pour ne pas dépendre de l'historique de la base."""
 
     @pytest.fixture
     def dsn(self):
@@ -277,8 +319,6 @@ class TestIntegrationPostgres:
 
     @pytest.fixture
     def enregistrement(self, dsn):
-        """Un enregistrement au `request_id` unique, dont les lignes sont effacées
-        à la fin du test."""
         import uuid
 
         import psycopg
@@ -343,8 +383,6 @@ class TestIntegrationPostgres:
         assert probabilite == pytest.approx(0.0731)
         assert decision == "accepted"
         assert version == "1"
-        # Le JSONB est relu en dictionnaire Python : c'est ce qui rend l'analyse de
-        # drift possible sans table à 779 colonnes.
         assert features["AMT_CREDIT"] == 406597.5
 
     def test_les_features_sont_interrogeables_en_sql(self, journal, enregistrement, dsn):
@@ -375,6 +413,28 @@ class TestIntegrationPostgres:
             ).fetchone()[0]
 
         assert nombre == 5
+
+    def test_une_requete_en_erreur_est_relisible(self, journal, dsn):
+        import uuid
+
+        import psycopg
+
+        identifiant = str(uuid.uuid4())
+        journal.record_request(requete(identifiant, status_code=500))
+        try:
+            with psycopg.connect(dsn) as conn:
+                ligne = conn.execute(
+                    "SELECT method, path, status_code, duration_ms "
+                    "FROM requests WHERE request_id = %s",
+                    (identifiant,),
+                ).fetchone()
+        finally:
+            with psycopg.connect(dsn) as conn:
+                conn.execute("DELETE FROM requests WHERE request_id = %s", (identifiant,))
+
+        assert ligne == ("POST", "/predict", 500, pytest.approx(3.5))
+
+
 class TestDemarrageAvecBaseDisponible:
     """Chemin nominal de `open()` : le schéma est prêt avant la première requête."""
 

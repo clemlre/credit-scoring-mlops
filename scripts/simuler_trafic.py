@@ -1,65 +1,31 @@
 """Envoie du trafic à l'API pour alimenter le journal des prédictions.
 
-À quoi ça sert
---------------
-Une solution de stockage vide ne se démontre pas, et une analyse de dérive sans
-données de production n'a rien à comparer. Ce script fabrique le « trafic de
-production » dont le monitoring a besoin.
+Les dossiers sont tirés du jeu de la Partie 1 (hors dépôt) ; à défaut, ils sont
+synthétiques et ne permettent pas de conclure sur la dérive.
 
-D'où viennent les dossiers
---------------------------
-Par défaut, de **vrais dossiers** du jeu de la Partie 1 (`feature_dataset.parquet`),
-qui vit hors du dépôt. C'est important : des valeurs inventées suivraient une
-distribution inventée, et l'analyse de dérive comparerait alors deux fictions. Si le
-parquet est introuvable, on retombe sur des dossiers synthétiques — utilisables pour
-une démonstration, mais **pas** pour conclure quoi que ce soit sur la dérive.
-
-Aucune donnée client n'est écrite dans le dépôt : elle est lue depuis le disque et
-envoyée à l'API, rien de plus.
-
-Usage
------
-    python scripts/simuler_trafic.py                          # 100 dossiers, port 8000
     python scripts/simuler_trafic.py --url http://127.0.0.1:8001 --nombre 500
-    python scripts/simuler_trafic.py --decalage 0.15          # dossiers volontairement décalés
+    python scripts/simuler_trafic.py --decalage 0.15    # dérive volontaire
+    python scripts/simuler_trafic.py --unitaire --par-seconde 5 --taux-erreur 0.02
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import random
 import sys
-import urllib.error
-import urllib.request
+import time
 from pathlib import Path
 
-TIMEOUT = 30
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-# Emplacement par défaut du projet Partie 1, surchargeable par l'environnement.
-P6_DEFAUT = r"C:\Users\ClementLoire\Documents\OpenClassrooms\P6 - Initiez-vous au MLOps 1-2"
-
-
-def appeler(url: str, chemin: str, charge: dict | None = None) -> tuple[int, dict]:
-    donnees = json.dumps(charge).encode() if charge is not None else None
-    requete = urllib.request.Request(
-        f"{url.rstrip('/')}{chemin}",
-        data=donnees,
-        headers={"Content-Type": "application/json"} if donnees else {},
-        method="POST" if donnees else "GET",
-    )
-    try:
-        with urllib.request.urlopen(requete, timeout=TIMEOUT) as reponse:
-            return reponse.status, json.loads(reponse.read())
-    except urllib.error.HTTPError as exc:
-        return exc.code, json.loads(exc.read() or b"{}")
+from smoke_test import call as appeler
 
 
 def dossiers_reels(noms_features: list[str], nombre: int) -> list[dict] | None:
     """Lit des dossiers réels dans le parquet de la Partie 1, ou None s'il est absent."""
-    parquet = Path(os.environ.get("P6_PROJECT_ROOT", P6_DEFAUT)) / "output" / "feature_dataset.parquet"
+    racine = os.environ.get("P6_PROJECT_ROOT")
+    if not racine:
+        return None
+    parquet = Path(racine) / "output" / "feature_dataset.parquet"
     if not parquet.exists():
         return None
 
@@ -67,17 +33,10 @@ def dossiers_reels(noms_features: list[str], nombre: int) -> list[dict] | None:
     import pandas as pd
 
     frame = pd.read_parquet(parquet)
-    # On tire dans les dossiers *sans* étiquette : ce sont ceux que le modèle n'a
-    # jamais vus, donc les plus représentatifs d'un flux de production.
-    candidats = frame[frame["TARGET"].isna()]
-    if len(candidats) < nombre:
-        candidats = frame
-    echantillon = candidats.sample(n=min(nombre, len(candidats)), random_state=42)
-
-    X = echantillon.drop(columns=[c for c in ("TARGET", "SK_ID_CURR") if c in echantillon.columns])
-    X = X.drop(columns=X.select_dtypes(include="object").columns)
-    X = X.replace([np.inf, -np.inf], np.nan)
-    X = X[[c for c in noms_features if c in X.columns]]
+    # Dossiers *sans* étiquette : jamais vus par le modèle, donc les plus
+    # représentatifs d'un flux de production.
+    echantillon = frame[frame["TARGET"].isna()].sample(n=nombre, random_state=42)
+    X = echantillon[noms_features].replace([np.inf, -np.inf], np.nan)
 
     return [
         {nom: (None if pd.isna(valeur) else float(valeur)) for nom, valeur in ligne.items()}
@@ -109,11 +68,7 @@ def dossiers_synthetiques(features_dossier: list[str], nombre: int) -> list[dict
 
 
 def decaler(dossiers: list[dict], intensite: float) -> list[dict]:
-    """Décale volontairement les scores externes, pour fabriquer de la dérive.
-
-    Sert à vérifier qu'un tableau de bord de monitoring **détecte** bien un
-    changement : un détecteur qu'on n'a jamais vu se déclencher ne prouve rien.
-    """
+    """Décale les scores externes, pour vérifier que la dérive est bien détectée."""
     if intensite <= 0:
         return dossiers
     decales = []
@@ -126,6 +81,46 @@ def decaler(dossiers: list[dict], intensite: float) -> list[dict]:
     return decales
 
 
+def corrompre(dossiers: list[dict], taux: float) -> list[dict]:
+    """Rend invalide une part des dossiers (montant négatif), pour faire apparaître
+    des 422 dans le suivi du taux d'erreur."""
+    alea = random.Random(7)
+    return [
+        {**dossier, "AMT_CREDIT": -1.0} if alea.random() < taux else dossier
+        for dossier in dossiers
+    ]
+
+
+def envoyer_unitaire(url: str, dossiers: list[dict], par_seconde: float) -> tuple[int, int, int]:
+    envoyes, acceptes, erreurs = 0, 0, 0
+    intervalle = 1 / par_seconde if par_seconde else 0
+    for dossier in dossiers:
+        debut = time.perf_counter()
+        statut, corps = appeler(url, "/predict", {"features": dossier})
+        if statut == 200:
+            envoyes += 1
+            acceptes += corps["decision"] == "accepted"
+        else:
+            erreurs += 1
+        time.sleep(max(0.0, intervalle - (time.perf_counter() - debut)))
+    return envoyes, acceptes, erreurs
+
+
+def envoyer_par_lots(url: str, dossiers: list[dict], taille: int) -> tuple[int, int, int]:
+    envoyes, acceptes, erreurs = 0, 0, 0
+    for depart in range(0, len(dossiers), taille):
+        tranche = dossiers[depart : depart + taille]
+        charge = {"items": [{"features": d} for d in tranche]}
+        statut, corps = appeler(url, "/predict/batch", charge)
+        if statut != 200:
+            print(f"  lot refusé (statut {statut}) : {corps.get('detail', '')[:160]}")
+            erreurs += 1
+            continue
+        envoyes += len(tranche)
+        acceptes += sum(p["decision"] == "accepted" for p in corps["predictions"])
+    return envoyes, acceptes, erreurs
+
+
 def main() -> int:
     parseur = argparse.ArgumentParser(description=__doc__)
     parseur.add_argument("--url", default="http://127.0.0.1:8000", help="Base de l'API.")
@@ -136,6 +131,11 @@ def main() -> int:
         type=float,
         default=0.0,
         help="Décale les scores externes de cette valeur, pour simuler une dérive.",
+    )
+    parseur.add_argument("--unitaire", action="store_true", help="Un appel /predict par dossier.")
+    parseur.add_argument("--par-seconde", type=float, default=0, help="Cadence en mode unitaire.")
+    parseur.add_argument(
+        "--taux-erreur", type=float, default=0.0, help="Part de dossiers invalides."
     )
     arguments = parseur.parse_args()
 
@@ -157,23 +157,19 @@ def main() -> int:
     if arguments.decalage:
         print(f"Décalage appliqué aux scores externes : -{arguments.decalage}")
 
-    envoyes, refuses, acceptes = 0, 0, 0
-    for depart in range(0, len(dossiers), arguments.lot):
-        tranche = dossiers[depart : depart + arguments.lot]
-        statut, corps = appeler(
-            arguments.url, "/predict/batch", {"items": [{"features": d} for d in tranche]}
-        )
-        if statut != 200:
-            print(f"  lot refusé (statut {statut}) : {corps.get('detail', '')[:160]}")
-            continue
-        envoyes += len(tranche)
-        for prediction in corps["predictions"]:
-            if prediction["decision"] == "accepted":
-                acceptes += 1
-            else:
-                refuses += 1
+    dossiers = corrompre(dossiers, arguments.taux_erreur)
 
-    print(f"\n{envoyes} prédictions journalisées — {acceptes} acceptées, {refuses} refusées.")
+    if arguments.unitaire:
+        envoyes, acceptes, erreurs = envoyer_unitaire(
+            arguments.url, dossiers, arguments.par_seconde
+        )
+    else:
+        envoyes, acceptes, erreurs = envoyer_par_lots(arguments.url, dossiers, arguments.lot)
+
+    print(
+        f"\n{envoyes} prédictions journalisées — {acceptes} acceptées, "
+        f"{envoyes - acceptes} refusées ; {erreurs} appel(s) en erreur."
+    )
     return 0 if envoyes else 1
 
 

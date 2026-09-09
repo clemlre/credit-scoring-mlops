@@ -1,13 +1,7 @@
-"""API de scoring de crédit — « Prêt à Dépenser ».
+"""API de scoring de crédit — Prêt à Dépenser.
 
-Sert le modèle de la Partie 1 derrière quelques routes documentées. Le modèle est
-chargé **une fois** au démarrage du processus (`lifespan`), jamais pendant une
-requête : le recharger coûterait ~1 seconde et 5 Mo par appel, pour un résultat
-identique.
-
-Lancement local :
-    uv run uvicorn api.main:app --reload
-Documentation interactive : http://127.0.0.1:8000/docs
+Lancement local : uv run uvicorn api.main:app --reload
+Documentation : http://127.0.0.1:8000/docs
 """
 
 from __future__ import annotations
@@ -16,11 +10,14 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Request, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.background import BackgroundTask
 
 from api import config
 from api.model import ModelLoadError, Prediction, ScoringModel
@@ -37,26 +34,22 @@ from api.schemas import (
     PredictionRequest,
     PredictionResponse,
 )
-from api.storage import PredictionLog, build_record
+from api.storage import PredictionLog, RequestRecord, build_record
 
 logger = logging.getLogger("api")
 
-# Nombre maximum de noms de features fautifs listés dans un message d'erreur.
-# Un payload truffé de fautes de frappe ne doit pas produire une réponse d'erreur
-# de plusieurs centaines de kilo-octets.
 MAX_REPORTED_UNKNOWN = 10
+MAX_REPORTED_VALIDATION_ERRORS = 10
+
+# Routes dont chaque appel est journalisé. /health en est exclu : la sonde du
+# conteneur l'appelle toutes les 30 s et noierait le taux d'erreur.
+TRACKED_PATHS = frozenset({"/predict", "/predict/batch", "/model/info", "/features"})
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Charge le modèle au démarrage, une seule fois pour toute la vie du processus.
-
-    Si l'artefact est absent ou corrompu, on démarre quand même, mais en mode
-    dégradé : /health répond 503 et le dit. Un conteneur qui redémarre en boucle
-    est bien plus difficile à diagnostiquer qu'un service qui répond « voici ce
-    qui me manque » — et la sonde de disponibilité le retire du trafic dans les
-    deux cas.
-    """
+    # Modèle chargé une seule fois. Artefact absent => mode dégradé (/health en 503)
+    # plutôt qu'un conteneur qui redémarre en boucle.
     try:
         app.state.model = ScoringModel.load()
         logger.info(
@@ -70,9 +63,6 @@ async def lifespan(app: FastAPI):
         app.state.model_error = str(exc)
         logger.error("Démarrage en mode dégradé : %s", exc)
 
-    # Le journal des prédictions suit le même principe que le modèle : ouvert une
-    # fois ici, fermé à l'arrêt. `open()` ne lève jamais — une base injoignable
-    # laisse le service opérationnel, avec le seul canal `stdout`.
     app.state.prediction_log = PredictionLog(config.DATABASE_URL)
     app.state.prediction_log.open()
 
@@ -99,23 +89,49 @@ app = FastAPI(
 )
 
 
+def _journaliser_requete(journal, record: RequestRecord) -> None:
+    try:
+        journal.record_request(record)
+    except Exception:
+        logger.exception("Journalisation de la requête impossible")
+
+
 @app.middleware("http")
 async def tag_request(request: Request, call_next):
-    """Attribue un identifiant unique à chaque requête et le renvoie en en-tête.
-
-    C'est ce qui rend le journal des prédictions exploitable : quand un conseiller
-    conteste un refus, il transmet le `X-Request-ID` reçu et l'on retrouve la ligne
-    exacte en base — score, seuil, version du modèle et features envoyées. Sans cet
-    identifiant, il faudrait chercher par horodatage approximatif.
-    """
     request.state.request_id = str(uuid.uuid4())
-    response = await call_next(request)
+    debut = time.perf_counter()
+    suivie = request.url.path in TRACKED_PATHS
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        # L'exception remonte jusqu'au handler 500 : on trace l'appel avant.
+        if suivie:
+            record = _request_record(request, 500, debut)
+            await run_in_threadpool(_journaliser_requete, request.app.state.prediction_log, record)
+        raise
+
     response.headers["X-Request-ID"] = request.state.request_id
+    if suivie:
+        record = _request_record(request, response.status_code, debut)
+        response.background = BackgroundTask(
+            _journaliser_requete, request.app.state.prediction_log, record
+        )
     return response
 
 
+def _request_record(request: Request, status_code: int, debut: float) -> RequestRecord:
+    return RequestRecord(
+        request_id=request.state.request_id,
+        occurred_at=datetime.now(UTC),
+        method=request.method,
+        path=request.url.path,
+        status_code=status_code,
+        duration_ms=(time.perf_counter() - debut) * 1000,
+    )
+
+
 def get_model(request: Request) -> ScoringModel:
-    """Fournit le modèle chargé, ou refuse la requête s'il est indisponible."""
     model = getattr(request.app.state, "model", None)
     if model is None:
         raise HTTPException(
@@ -128,39 +144,17 @@ def get_model(request: Request) -> ScoringModel:
     return model
 
 
-# Injection du modèle dans les routes. La forme `Annotated` est préférée à
-# `= Depends(...)` : elle garde la signature exempte d'appel de fonction en valeur
-# par défaut, ce qui la rend réutilisable et analysable par les outils statiques.
 ModelDependency = Annotated[ScoringModel, Depends(get_model)]
-
-
-# Nombre maximum d'erreurs de validation détaillées dans une réponse.
-MAX_REPORTED_VALIDATION_ERRORS = 10
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    """Transforme les erreurs de validation en message lisible, sans réémettre la valeur.
-
-    Le comportement par défaut de FastAPI recopie la valeur rejetée dans le corps de
-    la réponse. C'est un problème pour deux raisons :
-
-    1. **Il fait tomber le service.** `Infinity` et `NaN` franchissent le parseur JSON
-       de Python mais ne sont pas sérialisables en JSON valide : la réponse 422 lève
-       alors une `ValueError` et le client reçoit une erreur 500. Un simple
-       `{"AMT_CREDIT": Infinity}` suffisait à provoquer ça.
-    2. **Il recopie de la donnée client** dans les réponses d'erreur, donc dans les
-       journaux de tout ce qui est en aval. Un revenu ou un identifiant n'ont rien à
-       y faire.
-
-    On ne renvoie donc que l'emplacement et la raison — ce dont l'appelant a besoin
-    pour corriger sa requête, et rien de plus.
-    """
+    # Le handler par défaut recopie la valeur rejetée : NaN/Infinity rendent alors la
+    # réponse non sérialisable (500), et des données client finissent dans les logs.
     problems = []
     for error in exc.errors()[:MAX_REPORTED_VALIDATION_ERRORS]:
-        # `loc` commence par "body" : on le retire, il n'apprend rien à l'appelant.
         emplacement = ".".join(str(part) for part in error["loc"][1:]) or "corps de la requête"
         problems.append(f"{emplacement} : {error['msg']}")
 
@@ -178,12 +172,6 @@ async def validation_exception_handler(
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Filet de sécurité : une erreur imprévue ne doit pas fuiter de trace interne.
-
-    On journalise la pile côté serveur (pour le diagnostic) et on ne renvoie au
-    client qu'un message neutre — une trace exposerait des chemins et des versions
-    de bibliothèques.
-    """
     logger.exception("Erreur non gérée sur %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -192,11 +180,14 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 def _validate(model: ScoringModel, features: dict) -> None:
-    """Applique le contrat d'entrée. Lève une HTTPException 422 si l'entrée le viole."""
     unknown = model.unknown_features(features)
     if unknown:
         shown = ", ".join(unknown[:MAX_REPORTED_UNKNOWN])
-        extra = f" (et {len(unknown) - MAX_REPORTED_UNKNOWN} autres)" if len(unknown) > MAX_REPORTED_UNKNOWN else ""
+        extra = (
+            f" (et {len(unknown) - MAX_REPORTED_UNKNOWN} autres)"
+            if len(unknown) > MAX_REPORTED_UNKNOWN
+            else ""
+        )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
@@ -233,15 +224,6 @@ def _validate(model: ScoringModel, features: dict) -> None:
 
 
 def _journaliser_sans_echec(journal, records) -> None:
-    """Ultime filet : aucune exception ne sort d'une tâche de journalisation.
-
-    `PredictionLog.record` absorbe déjà ses propres erreurs, mais l'invariant « le
-    monitoring ne casse jamais une prédiction » ne doit pas dépendre de la
-    discipline d'une seule classe. Une exception qui remonterait d'ici serait levée
-    *après* l'envoi de la réponse : le client aurait son score, mais le serveur
-    afficherait une trace et pourrait couper la connexion. On la piège donc ici, une
-    fois pour toutes, quel que soit le journal branché.
-    """
     try:
         journal.record(records)
     except Exception:
@@ -257,16 +239,7 @@ def _journaliser(
     model: ScoringModel,
     latency_ms: float,
 ) -> None:
-    """Programme l'écriture des prédictions au journal, **après** la réponse.
-
-    `BackgroundTasks` garantit que l'appelant reçoit son score sans attendre
-    l'écriture en base : le monitoring n'entre pas dans le temps de réponse. Pour
-    un lot, tout part en un seul appel — donc un seul `executemany`.
-
-    Passé une certaine charge, cette approche montrerait ses limites (une tâche par
-    requête, sans file d'attente bornée) ; la suite serait une file interne avec un
-    consommateur unique, ou un envoi vers un collecteur externe.
-    """
+    # Écriture après l'envoi de la réponse : le monitoring n'entre pas dans la latence.
     latence_unitaire = latency_ms / len(predictions) if predictions else latency_ms
     records = [
         build_record(
@@ -302,14 +275,6 @@ def _to_response(prediction: Prediction, model: ScoringModel) -> PredictionRespo
 
 @app.get("/", include_in_schema=False)
 def racine() -> RedirectResponse:
-    """Renvoie la racine vers la documentation interactive.
-
-    Sans elle, `GET /` répond 404 : c'est la première chose que voit quelqu'un qui
-    ouvre l'URL du service déployé, et une erreur fait une mauvaise carte de visite.
-    La route est masquée du schéma OpenAPI — c'est un confort de navigation, pas un
-    point d'entrée métier, et le contrat publié continue de ne décrire que les cinq
-    routes réelles.
-    """
     return RedirectResponse(url="/docs")
 
 
@@ -321,11 +286,10 @@ def racine() -> RedirectResponse:
     responses={503: {"model": HealthResponse, "description": "Modèle non chargé."}},
 )
 def health(request: Request) -> JSONResponse:
-    """Sonde de disponibilité : répond 503 tant que le modèle n'est pas servable.
+    """Répond 503 tant que le modèle n'est pas chargé.
 
-    L'état du journal des prédictions est rapporté, mais **n'influence pas le code
-    de statut** : si PostgreSQL tombe, l'API sait toujours scorer, et la retirer du
-    trafic transformerait une panne de monitoring en panne de production.
+    L'état du journal des prédictions est rapporté mais n'influence pas le code de
+    statut : une base de monitoring en panne ne doit pas retirer l'API du trafic.
     """
     journal = getattr(request.app.state, "prediction_log", None)
     etat_journal = PredictionLogStatus(**journal.status()) if journal is not None else None
@@ -333,7 +297,9 @@ def health(request: Request) -> JSONResponse:
     model = getattr(request.app.state, "model", None)
     if model is None:
         body = HealthResponse(status="degraded", model_loaded=False, prediction_log=etat_journal)
-        return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=body.model_dump())
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=body.model_dump()
+        )
     body = HealthResponse(
         status="ok",
         model_loaded=True,
@@ -376,11 +342,10 @@ def model_info(model: ModelDependency) -> ModelInfoResponse:
     responses={503: {"model": ErrorResponse, "description": "Modèle non chargé."}},
 )
 def features(model: ModelDependency) -> FeaturesResponse:
-    """Liste exhaustive des features acceptées, séparées par origine.
+    """Liste des features acceptées, séparées entre dossier de demande et historique.
 
-    Les features « dossier » viennent de la demande elle-même et conditionnent
-    l'acceptation d'une requête ; les features « historique » sont des agrégats
-    calculés sur les crédits passés et peuvent légitimement manquer.
+    Seules les features du dossier conditionnent l'acceptation d'une requête ; les
+    agrégats d'historique peuvent manquer.
     """
     return FeaturesResponse(
         n_features=len(model.feature_names),
@@ -433,12 +398,7 @@ def predict_batch(
     request: Request,
     background: BackgroundTasks,
 ) -> BatchPredictionResponse:
-    """Score un lot de demandes.
-
-    Un seul appel au modèle est fait pour tout le lot : LightGBM vectorise sur la
-    matrice entière, ce qui est nettement plus rapide que N appels unitaires.
-    Le lot est plafonné pour borner le coût d'une requête.
-    """
+    """Score un lot de demandes en un seul appel au modèle (taille plafonnée)."""
     if len(payload.items) > config.MAX_BATCH_SIZE:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -453,7 +413,6 @@ def predict_batch(
         try:
             _validate(model, item.features)
         except HTTPException as exc:
-            # Sans la position, l'appelant d'un lot de 500 ne sait pas quoi corriger.
             raise HTTPException(
                 status_code=exc.status_code, detail=f"Demande n°{position} : {exc.detail}"
             ) from exc
