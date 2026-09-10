@@ -1,0 +1,46 @@
+{
+  "etiquette": "apres - processus local",
+  "mode": "etapes",
+  "cible": "processus",
+  "date": "2026-09-10T15:14:29+00:00",
+  "commit": "07a7fda",
+  "plateforme": "Windows-10-10.0.26200-SP0",
+  "python": "3.11.1",
+  "resultats": {
+    "validation_pydantic": {
+      "n": 2000,
+      "p50": 0.0807,
+      "p95": 0.1488,
+      "p99": 0.291,
+      "moyenne": 0.0927
+    },
+    "controle_contrat": {
+      "n": 2000,
+      "p50": 0.0629,
+      "p95": 0.133,
+      "p99": 0.2983,
+      "moyenne": 0.0774
+    },
+    "inference_unitaire": {
+      "n": 2000,
+      "p50": 0.433,
+      "p95": 0.8817,
+      "p99": 3.2576,
+      "moyenne": 0.6099
+    },
+    "route_sans_http": {
+      "n": 2000,
+      "p50": 0.6213,
+      "p95": 1.047,
+      "p99": 1.4292,
+      "moyenne": 0.6814
+    },
+    "inference_par_dossier_en_lot": {
+      "n": 100,
+      "p50": 0.1587,
+      "p95": 0.373,
+      "p99": 1.177,
+      "moyenne": 0.1952
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "date": "2026-09-10T15:13:50+00:00",
+  "commit": "07a7fda",
+  "plateforme": "Windows-10-10.0.26200-SP0",
+  "python": "3.11.1",
+  "fidelite": {
+    "dossiers": 100000,
+    "ecart_max": 0.007105970233632131,
+    "ecart_moyen": 1.670969091072106e-06,
+    "ecart_p99": 4.3404951624151317e-07,
+    "dossiers_ecart_sup_1e-4": 183,
+    "decisions_divergentes": 0
+  },
+  "vitesse_ms": {
+    "lightgbm_unitaire": {
+      "n": 3000,
+      "p50": 0.2943,
+      "p95": 0.8728,
+      "p99": 2.3296,
+      "moyenne": 0.4347
+    },
+    "onnx_unitaire": {
+      "n": 3000,
+      "p50": 0.1535,
+      "p95": 0.4329,
+      "p99": 1.0636,
+      "moyenne": 0.2107
+    },
+    "lightgbm_lot_200": {
+      "n": 200,
+      "p50": 37.3963,
+      "p95": 82.1253,
+      "p99": 136.3357,
+      "moyenne": 44.075
+    },
+    "onnx_lot_200": {
+      "n": 200,
+      "p50": 18.3084,
+      "p95": 26.7686,
+      "p99": 42.4911,
+      "moyenne": 19.4572
+    }
+  },
+  "operateurs_onnx": [
+    "Cast",
+    "Identity",
+    "Mul",
+    "TreeEnsembleClassifier"
+  ],
+  "taille_onnx_mo": 3.78,
+  "taille_lightgbm_mo": 5.68
+}

@@ -1,0 +1,27 @@
+Latence d'un appel booster.predict sur un dossier, dans l'image finale limitée à 2 CPU.
+Poste : Windows 11, Docker Desktop (WSL2), hôte à 14 cœurs. 2026-09-10.
+
+Commande (depuis la racine du dépôt, image construite avec `docker build -t credit-scoring-api:final .`) :
+  docker run --rm --cpus=2 -e OMP_NUM_THREADS=<n> -w /app credit-scoring-api:final python -c "<code ci-dessous>"
+
+  import json, statistics, time
+  from api.model import ScoringModel
+  m = ScoringModel.load()
+  x = m._to_matrix([json.load(open("api/exemple_dossier_refuse.json"))])
+  # 20 ou 200 appels d'échauffement, puis N appels chronométrés
+
+Série 1 (300 appels) :
+OMP_NUM_THREADS=1   p50=0.200 ms  p95=0.897 ms
+OMP_NUM_THREADS=2   p50=0.135 ms  p95=0.562 ms
+OMP_NUM_THREADS=14  p50=102.381 ms  p95=195.967 ms
+
+Série 2 (3000 appels, deux tours) :
+OMP_NUM_THREADS=1   p50=0.061 ms  p95=0.113 ms
+OMP_NUM_THREADS=2   p50=0.081 ms  p95=0.298 ms
+OMP_NUM_THREADS=1   p50=0.119 ms  p95=0.447 ms
+OMP_NUM_THREADS=2   p50=0.097 ms  p95=0.234 ms
+
+Lecture : 1 et 2 threads sont dans le bruit l'un de l'autre. 14 threads (valeur par défaut,
+os.cpu_count() dans le conteneur) multiplient la latence par ~1000 : les threads OpenMP en
+attente active consomment le quota CFS de 2 CPU et le conteneur est bridé jusqu'à la période
+suivante (100 ms).
