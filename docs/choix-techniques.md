@@ -67,7 +67,7 @@ confiance à l'appelant sur le calcul des agrégats.
 | Lisibilité | texte, inspectable | binaire opaque |
 
 Conséquence mesurée : l'image de production n'a besoin ni de scikit-learn, ni de pandas,
-ni de pyarrow — **951 Mo → 563 Mo**.
+ni de pyarrow — **951 Mo → 563 Mo** (583 Mo depuis l'ajout du pilote PostgreSQL).
 
 ---
 
@@ -136,3 +136,42 @@ aucun trafic n'est servi par erreur.
 build Docker ne fonctionnent, puisque le registre MLflow de la Partie 1 vit hors dépôt.
 Coût : 5,4 Mo, une version. En contexte industriel, l'artefact vivrait dans un registre
 de modèles ou un magasin d'artefacts, et le pipeline l'y récupérerait au build.
+
+---
+
+## 8. Streamlit pour le tableau de bord, branché directement sur PostgreSQL
+
+**Choisi** : une application Streamlit (`monitoring/dashboard.py`) qui interroge les tables
+`requests` et `predictions` et recalcule le PSI à la volée à partir d'un profil de
+référence versionné (`monitoring/profil_reference.json`).
+
+| Option | Pourquoi écartée |
+|---|---|
+| Grafana | Très bon pour les séries temporelles et l'alerting, mais ne calcule pas un PSI : il faudrait un job qui pré-agrège la dérive en table. Et c'est un service de plus à opérer. |
+| Evidently UI | Rapports riches, mais construits par instantanés ; le notebook de drift couvre déjà ce besoin d'analyse ponctuelle. |
+| Gradio | Pensé pour la démonstration d'un modèle, pas pour un suivi de production. |
+
+Streamlit est l'une des deux ressources du projet, s'écrit en Python avec les mêmes
+bibliothèques que le reste, et partage ses calculs avec les tests
+(`monitoring/indicateurs.py` est testé sans Streamlit).
+
+Le profil de référence ne contient que des déciles et des proportions pour les 20 features
+suivies : aucune ligne client ne quitte le poste. Il est reconstruit par
+`monitoring/construire_reference.py` si le modèle change.
+
+**Ce qui rendrait ce choix mauvais** : une supervision 24/7 par une équipe d'exploitation,
+avec alertes par e-mail ou astreinte. Il faudrait alors Prometheus et Grafana pour le
+service, et un calcul de dérive planifié dont le résultat serait stocké.
+
+---
+
+## 9. LightGBM natif plutôt qu'ONNX Runtime en production
+
+ONNX Runtime a été évalué à l'étape 4 : deux fois plus rapide sur l'appel au modèle, mais
+l'inférence ne pèse qu'environ 3 % d'une requête, et le convertisseur (entrées float32
+seulement) ne reproduit les probabilités qu'à 7 × 10⁻³ près sur 100 000 dossiers réels.
+Le modèle servi reste celui validé à la Partie 1, au bit près. Détails et chiffres :
+[`optimisation.md`](optimisation.md).
+
+**Ce qui rendrait ce choix mauvais** : un modèle nettement plus lourd, où l'inférence
+redeviendrait le poste principal du temps de réponse.

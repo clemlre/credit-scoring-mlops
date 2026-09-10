@@ -66,7 +66,7 @@ la décision, sans toucher au reste du dossier.
 ├── notebooks/            # analyses Partie 1, puis notebook de data drift (étape 3)
 ├── tests/                # tests automatisés pytest
 ├── models/               # artefact déployable + paramètres de référence
-├── monitoring/           # réservé aux exports locaux, non versionnés
+├── monitoring/           # tableau de bord Streamlit, calculs de dérive, profil de référence
 ├── docs/                 # documentation, captures d'écran, mesures de performance (perf/)
 ├── data/                 # CSV Home Credit — NON versionnés, voir data/README.md
 ├── .github/workflows/    # pipeline CI/CD
@@ -86,6 +86,8 @@ cd credit-scoring-mlops
 uv sync                          # coeur d'inférence + outils de dev (uv inclut le groupe `dev` par défaut)
 uv sync --no-dev                 # coeur d'inférence seul — ce que contiendra l'image Docker
 uv sync --group training         # + MLflow, Optuna, SHAP, Jupyter (reproduire la Partie 1)
+uv sync --group monitoring       # + Evidently, Streamlit (notebook de drift, tableau de bord)
+uv sync --group perf             # + ONNX Runtime (évaluation de l'étape 4)
 ```
 
 Les dépendances sont volontairement séparées : `[project].dependencies` ne contient que
@@ -111,9 +113,11 @@ les tests et l'image Docker fonctionnent sans rien préparer. Pour le régénér
 le registre MLflow de la Partie 1 :
 
 ```bash
-uv run --group training python src/export_model.py
 uv run --group training python src/export_model.py --p6-root "/chemin/vers/projet-partie-1"
 ```
+
+Le chemin peut aussi venir de la variable `P6_PROJECT_ROOT` (voir `.env.example`), lue
+également par les tests de fidélité et les scripts d'analyse.
 
 Le script vérifie lui-même que l'artefact reproduit le modèle du registre à
 l'identique sur 500 clients, et refuse d'aboutir sinon.
@@ -200,14 +204,17 @@ complet.
 ## Tests
 
 ```bash
-uv run pytest                                    # suite complète
-uv run pytest --cov=api --cov-report=term-missing  # avec couverture
+uv run pytest                                   # suite complète
+uv run pytest --cov --cov-report=term-missing   # avec couverture
 ```
 
-119 tests, **100 % de couverture** sur `api/` (plancher CI : 95 %). Aucune donnée
-client n'est versionnée : les dossiers de test sont générés de façon déterministe.
-Les tests de fidélité numérique sur de vrais clients s'ignorent d'eux-mêmes si les
-données de la Partie 1 ne sont pas disponibles.
+146 tests, **100 % de couverture** sur `api/` et `monitoring/indicateurs.py` (plancher
+CI : 95 %). Aucune donnée client n'est versionnée : les dossiers de test sont générés de
+façon déterministe. Deux familles de tests ne tournent que si leur ressource existe :
+
+- les tests d'intégration PostgreSQL, si `DATABASE_URL` est défini (c'est le cas en CI) ;
+- les tests de fidélité sur de vrais clients, si `P6_PROJECT_ROOT` désigne le projet de
+  la Partie 1 (jamais en CI, les données Kaggle n'y sont pas).
 
 ## Intégration et déploiement continus
 
@@ -218,8 +225,9 @@ et manuellement.
 2. **Image Docker** — construction, démarrage du conteneur, et test de fumée contre
    le service réel. L'image n'est publiée sur GHCR que si ce test passe, et jamais
    depuis une pull request.
-3. **Déploiement** — uniquement depuis `main`. S'active si le secret `HF_TOKEN` et la
-   variable `HF_SPACE` sont définis, puis revérifie le service déployé.
+3. **Déploiement** — uniquement depuis `main`. Exige le secret `HF_TOKEN` et la
+   variable `HF_SPACE` : s'ils manquent, le job échoue au lieu de passer au vert sans
+   rien déployer. Il revérifie ensuite le service déployé.
 
 Aucun identifiant n'est écrit dans le dépôt : la publication d'image utilise le
 `GITHUB_TOKEN` éphémère, le déploiement un secret de dépôt.
@@ -275,8 +283,17 @@ volumétrie mesurée, comportement en cas de panne — est dans
 ```bash
 docker compose up -d --build          # API + PostgreSQL
 python scripts/simuler_trafic.py      # alimente le journal en trafic réaliste
-docker exec scoring-db psql -U scoring -d monitoring
+uv run --group monitoring streamlit run monitoring/dashboard.py   # tableau de bord
 ```
+
+Le tableau de bord (<http://127.0.0.1:8501>) montre, sur la période choisie : le volume
+d'appels et le taux d'erreur, la latence de `/predict`, la distribution des scores et le
+taux de refus, et la dérive des 20 features les plus importantes du modèle. Il affiche une
+alerte dès qu'une erreur 500 apparaît, que plus de 5 % des appels sont refusés, que la
+latence p95 dépasse 100 ms ou qu'une feature dérive au-delà d'un PSI de 0,25. Captures et
+détail : [`docs/monitoring.md`](docs/monitoring.md#tableau-de-bord).
+
+![Tableau de bord — trafic décalé : les trois scores externes en dérive](docs/screenshots/dashboard-5-derive-trafic-decale.png)
 
 **Trois choses à savoir pour lire ce monitoring :**
 
@@ -319,6 +336,10 @@ suivi par minute, et état de l'infrastructure.
 **Messages de commit** — convention [Conventional Commits](https://www.conventionalcommits.org/fr/) :
 `type(portée): description à l'infinitif`, avec `feat`, `fix`, `docs`, `test`, `ci`,
 `chore`, `perf`.
+
+**Nommage** — anglais dans `api/` (code de service), français dans les scripts
+d'analyse, le tableau de bord et les noms de tests ; messages et documentation en
+français. Style vérifié par ruff (`pyproject.toml`).
 
 **Ce qui n'entre jamais dans le dépôt** : données clients, CSV bruts, artefacts MLflow,
 secrets et credentials (voir `.gitignore`).

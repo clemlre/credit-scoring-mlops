@@ -1,8 +1,9 @@
 # Déploiement de l'API
 
-Le pipeline CI/CD déploie l'API automatiquement à chaque poussée sur `main`, **à
-condition** que les identifiants du service cible soient configurés. Ce document décrit
-la configuration à faire une fois, et ce qui se passe ensuite.
+Le pipeline CI/CD déploie l'API automatiquement à chaque poussée sur `main`. Les
+identifiants du service cible **doivent** être configurés : sans eux, le job de
+déploiement échoue. Ce document décrit la configuration à faire une fois, et ce qui se
+passe ensuite.
 
 ## Ce que fait le pipeline
 
@@ -36,9 +37,10 @@ docker run -p 8000:8000 ghcr.io/clemlre/credit-scoring-mlops:latest
 
 ### Hugging Face Spaces — service en ligne, à configurer une fois
 
-C'est la cible recommandée par l'énoncé du projet. Le déploiement reste **inactif tant
-que les identifiants ne sont pas fournis** : le job le signale et se termine sans échouer,
-pour ne pas faire échouer une CI par ailleurs valide.
+C'est la cible recommandée par l'énoncé du projet. Sans les identifiants ci-dessous, le
+job de déploiement **échoue explicitement** (`secret HF_TOKEN absent`, `variable HF_SPACE
+absente`) : un déploiement qui n'a pas eu lieu ne doit pas passer pour réussi. Les jobs
+de lint, de tests et d'image, eux, restent verts.
 
 #### Configuration (une seule fois)
 
@@ -76,9 +78,10 @@ pour ne pas faire échouer une CI par ailleurs valide.
   dont le message porte l'empreinte du commit GitHub d'origine pour la traçabilité. Le
   Space reconstruit ensuite l'image à partir du `Dockerfile`.
 - Il **interroge l'API Hugging Face** jusqu'à ce que le Space passe à l'état `RUNNING`
-  (15 min au maximum), puis lance `scripts/smoke_test.py` sur l'URL publique que
-  l'API déclare. Un build en échec (`BUILD_ERROR`, `RUNTIME_ERROR`, `CONFIG_ERROR`)
-  fait échouer le pipeline immédiatement, sans attendre la fin du délai.
+  (15 min au maximum), puis lance `scripts/smoke_test.py` sur l'URL publique du Space,
+  déduite de `HF_SPACE` (`<compte>-<nom-du-space>.hf.space`). Un build en échec
+  (`BUILD_ERROR`, `RUNTIME_ERROR`, `CONFIG_ERROR`) fait échouer le pipeline
+  immédiatement, sans attendre la fin du délai.
 
 L'API est ensuite accessible sur `https://<compte>-<nom-du-space>.hf.space`, avec sa
 documentation Swagger sur `/docs`.
