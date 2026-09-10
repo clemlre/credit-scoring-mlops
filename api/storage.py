@@ -17,18 +17,21 @@ import logging
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
+
+from psycopg.types.json import Jsonb
+from psycopg_pool import ConnectionPool
 
 from api import config
 
 logger = logging.getLogger("api")
 
-TABLE = "predictions"
-REQUESTS_TABLE = "requests"
-
-SCHEMA_SQL = f"""
-CREATE TABLE IF NOT EXISTS {TABLE} (
+# Le verrou sérialise la création entre workers : deux CREATE TABLE IF NOT EXISTS
+# concurrents se heurtent sinon sur le catalogue (DuplicateTable, UniqueViolation).
+SCHEMA_SQL = """
+SELECT pg_advisory_xact_lock(hashtext('credit_scoring.schema'));
+CREATE TABLE IF NOT EXISTS predictions (
     id                BIGSERIAL   PRIMARY KEY,
     request_id        UUID        NOT NULL,
     occurred_at       TIMESTAMPTZ NOT NULL,
@@ -44,12 +47,12 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
     latency_ms        DOUBLE PRECISION NOT NULL,
     features          JSONB       NOT NULL
 );
-CREATE INDEX IF NOT EXISTS {TABLE}_occurred_at_idx
-    ON {TABLE} (occurred_at DESC);
-CREATE INDEX IF NOT EXISTS {TABLE}_model_version_idx
-    ON {TABLE} (model_version, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS predictions_occurred_at_idx
+    ON predictions (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS predictions_model_version_idx
+    ON predictions (model_version, occurred_at DESC);
 
-CREATE TABLE IF NOT EXISTS {REQUESTS_TABLE} (
+CREATE TABLE IF NOT EXISTS requests (
     id          BIGSERIAL   PRIMARY KEY,
     request_id  UUID        NOT NULL,
     occurred_at TIMESTAMPTZ NOT NULL,
@@ -58,20 +61,20 @@ CREATE TABLE IF NOT EXISTS {REQUESTS_TABLE} (
     status_code INTEGER     NOT NULL,
     duration_ms DOUBLE PRECISION NOT NULL
 );
-CREATE INDEX IF NOT EXISTS {REQUESTS_TABLE}_occurred_at_idx
-    ON {REQUESTS_TABLE} (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS requests_occurred_at_idx
+    ON requests (occurred_at DESC);
 """
 
-INSERT_SQL = f"""
-INSERT INTO {TABLE} (
+INSERT_SQL = """
+INSERT INTO predictions (
     request_id, occurred_at, endpoint, model_version, threshold,
     probability, decision, features_provided, features_missing,
     application_ratio, history_ratio, latency_ms, features
 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
-INSERT_REQUEST_SQL = f"""
-INSERT INTO {REQUESTS_TABLE} (
+INSERT_REQUEST_SQL = """
+INSERT INTO requests (
     request_id, occurred_at, method, path, status_code, duration_ms
 ) VALUES (%s, %s, %s, %s, %s, %s)
 """
@@ -112,8 +115,6 @@ class PredictionRecord:
         }
 
     def row(self) -> tuple:
-        from psycopg.types.json import Jsonb
-
         return (
             self.request_id,
             self.occurred_at,
@@ -200,8 +201,6 @@ class PredictionLog:
             return
 
         try:
-            from psycopg_pool import ConnectionPool
-
             # open(wait=False) : l'API démarre même si PostgreSQL n'est pas encore prêt.
             self._pool = ConnectionPool(
                 self._dsn,
@@ -240,12 +239,12 @@ class PredictionLog:
     def status(self) -> dict[str, Any]:
         """Dernier état connu, sans requête SQL (appelé par /health)."""
         if not self.database_enabled:
-            etat = "disabled"
+            database = "disabled"
         elif self._schema_ready and self.last_error is None:
-            etat = "ready"
+            database = "ready"
         else:
-            etat = "unavailable"
-        return {"stdout": True, "database": etat, "last_error": self.last_error}
+            database = "unavailable"
+        return {"stdout": True, "database": database, "last_error": self.last_error}
 
     def record(self, records: Sequence[PredictionRecord]) -> None:
         """Journalise un lot de prédictions. Ne lève jamais."""
@@ -298,36 +297,7 @@ class PredictionLog:
 
 
 def _describe(exc: BaseException) -> str:
-    """Message court et borné, pour ne jamais recopier la chaîne de connexion."""
-    message = str(exc).strip().splitlines()[0] if str(exc).strip() else exc.__class__.__name__
-    return f"{exc.__class__.__name__}: {message}"[:300]
-
-
-def build_record(
-    *,
-    request_id: str,
-    endpoint: str,
-    features: dict[str, Any],
-    probability: float,
-    decision: str,
-    coverage,
-    model_version: str,
-    threshold: float,
-    latency_ms: float,
-) -> PredictionRecord:
-    return PredictionRecord(
-        request_id=request_id,
-        occurred_at=datetime.now(UTC),
-        endpoint=endpoint,
-        model_version=model_version,
-        threshold=threshold,
-        probability=probability,
-        decision=decision,
-        features_provided=coverage.provided,
-        features_missing=coverage.missing,
-        application_ratio=coverage.application_ratio,
-        history_ratio=coverage.history_ratio,
-        latency_ms=latency_ms,
-        # Payload tel que reçu, pas la ligne complétée à 779 colonnes.
-        features=dict(features),
-    )
+    """Type et première ligne du message, bornés à 300 caractères."""
+    message = str(exc).strip()
+    first_line = message.splitlines()[0] if message else exc.__class__.__name__
+    return f"{exc.__class__.__name__}: {first_line}"[:300]

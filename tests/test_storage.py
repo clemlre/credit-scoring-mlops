@@ -8,22 +8,16 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import uuid
 from contextlib import contextmanager
+from datetime import UTC, datetime
 
+import psycopg
 import pytest
 
-from api import config
-from api.storage import (
-    PredictionLog,
-    PredictionRecord,
-    RequestRecord,
-    _describe,
-    build_record,
-)
-
-# --------------------------------------------------------------------------
-# Doublures
-# --------------------------------------------------------------------------
+from api import config, storage
+from api.storage import PredictionLog, PredictionRecord, RequestRecord, _describe
 
 
 class FakeCursor:
@@ -72,27 +66,31 @@ class FakePool:
         self.closed = True
 
 
-@pytest.fixture
-def record(model) -> PredictionRecord:
+def prediction(request_id: str = "11111111-2222-3333-4444-555555555555") -> PredictionRecord:
     """Un enregistrement représentatif, bâti comme le fait l'API."""
-    from api.model import Coverage
-
-    return build_record(
-        request_id="11111111-2222-3333-4444-555555555555",
+    return PredictionRecord(
+        request_id=request_id,
+        occurred_at=datetime.now(UTC),
         endpoint="/predict",
-        features={"AMT_CREDIT": 406597.5, "EXT_SOURCE_2": 0.2629},
-        probability=0.0731,
-        decision="accepted",
-        coverage=Coverage(provided=2, missing=777, application_ratio=0.9, history_ratio=0.1),
         model_version="1",
         threshold=0.1,
+        probability=0.0731,
+        decision="accepted",
+        features_provided=2,
+        features_missing=777,
+        application_ratio=0.9,
+        history_ratio=0.1,
         latency_ms=4.2,
+        features={"AMT_CREDIT": 406597.5, "EXT_SOURCE_2": 0.2629},
     )
 
 
-def requete(request_id="11111111-2222-3333-4444-555555555555", status_code=422):
-    from datetime import UTC, datetime
+@pytest.fixture
+def record() -> PredictionRecord:
+    return prediction()
 
+
+def requete(request_id="11111111-2222-3333-4444-555555555555", status_code=422):
     return RequestRecord(
         request_id=request_id,
         occurred_at=datetime.now(UTC),
@@ -101,9 +99,6 @@ def requete(request_id="11111111-2222-3333-4444-555555555555", status_code=422):
         status_code=status_code,
         duration_ms=3.5,
     )
-
-
-# --------------------------------------------------------------------------
 
 
 class TestJournalDesRequetes:
@@ -203,7 +198,8 @@ class TestEcritureEnBase:
         journal._pool = FakePool()
         journal.record([record])
 
-        assert any("CREATE TABLE IF NOT EXISTS predictions" in sql for sql in journal._pool.executed)
+        executees = journal._pool.executed
+        assert any("CREATE TABLE IF NOT EXISTS predictions" in sql for sql in executees)
         assert journal.status()["database"] == "ready"
 
     def test_le_schema_n_est_cree_qu_une_fois(self, record):
@@ -276,11 +272,9 @@ class TestDefaillanceDeLaBase:
         journal.record([record])
         assert journal.status()["database"] == "ready"
 
-    def test_une_chaine_de_connexion_ne_fuite_jamais_dans_un_message(self):
-        """`DATABASE_URL` contient un mot de passe : il n'a rien à faire dans un
-        journal ni dans une réponse HTTP."""
-        exc = RuntimeError("connexion refusée pour postgresql://user:motdepasse@hote/base")
-        message = _describe(exc)
+    def test_un_message_commence_par_le_type_d_exception(self):
+        """Le type en tête permet d'identifier la cause dans /health et les journaux."""
+        message = _describe(RuntimeError("connexion refusée"))
 
         assert message.startswith("RuntimeError:")
         assert len(message) <= 300
@@ -304,6 +298,9 @@ class TestOuvertureReelleDuPool:
         try:
             assert journal.database_enabled is True
             assert journal.status()["database"] == "unavailable"
+            # `last_error` est exposé par /health : le mot de passe de `DATABASE_URL`
+            # ne doit jamais s'y retrouver.
+            assert "secret" not in journal.last_error
         finally:
             journal.close()
 
@@ -328,31 +325,12 @@ class TestIntegrationPostgres:
 
     @pytest.fixture
     def enregistrement(self, dsn):
-        import uuid
-
-        import psycopg
-
-        from api.model import Coverage
-
-        identifiant = str(uuid.uuid4())
-        yield build_record(
-            request_id=identifiant,
-            endpoint="/predict",
-            features={"AMT_CREDIT": 406597.5, "EXT_SOURCE_2": 0.2629},
-            probability=0.0731,
-            decision="accepted",
-            coverage=Coverage(provided=2, missing=777, application_ratio=0.9, history_ratio=0.1),
-            model_version="1",
-            threshold=0.1,
-            latency_ms=4.2,
-        )
-
+        record = prediction(str(uuid.uuid4()))
+        yield record
         with psycopg.connect(dsn) as conn:
-            conn.execute("DELETE FROM predictions WHERE request_id = %s", (identifiant,))
+            conn.execute("DELETE FROM predictions WHERE request_id = %s", (record.request_id,))
 
     def test_le_schema_est_reellement_cree(self, journal, dsn):
-        import psycopg
-
         assert journal.status()["database"] == "ready"
         with psycopg.connect(dsn) as conn:
             colonnes = conn.execute(
@@ -365,8 +343,6 @@ class TestIntegrationPostgres:
     def test_les_index_de_monitoring_existent(self, journal, dsn):
         """Sans index sur `occurred_at`, « les prédictions des 7 derniers jours »
         finirait en parcours complet de table."""
-        import psycopg
-
         with psycopg.connect(dsn) as conn:
             index = conn.execute(
                 "SELECT indexname FROM pg_indexes WHERE tablename = 'predictions'"
@@ -376,8 +352,6 @@ class TestIntegrationPostgres:
         assert "predictions_model_version_idx" in noms
 
     def test_une_prediction_est_relisible_avec_ses_features(self, journal, enregistrement, dsn):
-        import psycopg
-
         journal.record([enregistrement])
 
         with psycopg.connect(dsn) as conn:
@@ -396,8 +370,6 @@ class TestIntegrationPostgres:
 
     def test_les_features_sont_interrogeables_en_sql(self, journal, enregistrement, dsn):
         """Le vrai intérêt de JSONB face à un fichier de journaux : agréger."""
-        import psycopg
-
         journal.record([enregistrement, enregistrement])
 
         with psycopg.connect(dsn) as conn:
@@ -411,8 +383,6 @@ class TestIntegrationPostgres:
         assert moyenne == pytest.approx(0.2629)
 
     def test_un_lot_est_insere_en_une_transaction(self, journal, enregistrement, dsn):
-        import psycopg
-
         journal.record([enregistrement] * 5)
 
         with psycopg.connect(dsn) as conn:
@@ -423,11 +393,41 @@ class TestIntegrationPostgres:
 
         assert nombre == 5
 
+    def test_plusieurs_workers_creent_le_schema_sans_conflit(self, dsn):
+        """Deux workers uvicorn démarrent en même temps : leurs CREATE TABLE IF NOT
+        EXISTS concurrents ne doivent pas se gêner. Schéma jetable, pour partir de
+        tables inexistantes sans toucher aux données de la base."""
+        from psycopg.conninfo import make_conninfo
+
+        schema = f"test_{uuid.uuid4().hex[:8]}"
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute(f'CREATE SCHEMA "{schema}"')
+        journaux = [
+            PredictionLog(make_conninfo(dsn, options=f"-c search_path={schema}"))
+            for _ in range(4)
+        ]
+        depart = threading.Barrier(len(journaux))
+
+        def ouvrir(journal):
+            depart.wait()
+            journal.open()
+
+        fils = [threading.Thread(target=ouvrir, args=(j,)) for j in journaux]
+        try:
+            for f in fils:
+                f.start()
+            for f in fils:
+                f.join()
+            assert [j.status()["database"] for j in journaux] == ["ready"] * 4, [
+                j.last_error for j in journaux
+            ]
+        finally:
+            for j in journaux:
+                j.close()
+            with psycopg.connect(dsn, autocommit=True) as conn:
+                conn.execute(f'DROP SCHEMA "{schema}" CASCADE')
+
     def test_une_requete_en_erreur_est_relisible(self, journal, dsn):
-        import uuid
-
-        import psycopg
-
         identifiant = str(uuid.uuid4())
         journal.record_request(requete(identifiant, status_code=500))
         try:
@@ -448,8 +448,6 @@ class TestDemarrageAvecBaseDisponible:
     """Chemin nominal de `open()` : le schéma est prêt avant la première requête."""
 
     def test_le_schema_est_prepare_des_le_demarrage(self, monkeypatch):
-        import psycopg_pool
-
         class PoolInstrumente(FakePool):
             def __init__(self, *args, **kwargs):
                 super().__init__()
@@ -457,7 +455,7 @@ class TestDemarrageAvecBaseDisponible:
             def open(self, wait=False):
                 self.opened = True
 
-        monkeypatch.setattr(psycopg_pool, "ConnectionPool", PoolInstrumente)
+        monkeypatch.setattr(storage, "ConnectionPool", PoolInstrumente)
 
         journal = PredictionLog("postgresql://simule")
         journal.open()
@@ -470,12 +468,11 @@ class TestDemarrageAvecBaseDisponible:
     def test_un_pool_impossible_a_construire_laisse_le_service_debout(self, monkeypatch):
         """Chaîne de connexion malformée, pilote absent : l'API doit démarrer quand
         même et se contenter du canal `stdout`."""
-        import psycopg_pool
 
         def refuser(*args, **kwargs):
             raise ValueError("chaîne de connexion invalide (simulée)")
 
-        monkeypatch.setattr(psycopg_pool, "ConnectionPool", refuser)
+        monkeypatch.setattr(storage, "ConnectionPool", refuser)
 
         journal = PredictionLog("ce-n-est-pas-une-url")
         journal.open()  # ne doit pas lever
