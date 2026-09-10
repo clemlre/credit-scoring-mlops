@@ -1,0 +1,26 @@
+{
+  "etiquette": "avant - image Docker, 2 CPU",
+  "mode": "http",
+  "cible": "http://127.0.0.1:8010",
+  "date": "2026-09-10T14:26:27+00:00",
+  "commit": "ae0e476",
+  "plateforme": "Windows-10-10.0.26200-SP0",
+  "python": "3.11.1",
+  "resultats": {
+    "sequentiel": {
+      "n": 2000,
+      "p50": 9.8962,
+      "p95": 17.4049,
+      "p99": 26.0574,
+      "moyenne": 10.7692
+    },
+    "concurrence_8": {
+      "n": 2000,
+      "p50": 57.5818,
+      "p95": 138.3528,
+      "p99": 192.3855,
+      "moyenne": 67.7204,
+      "debit_req_s": 114.1
+    }
+  }
+}

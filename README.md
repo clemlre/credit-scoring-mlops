@@ -41,7 +41,7 @@ la décision, sans toucher au reste du dossier.
 | 1 | Contrôle de version, structure du projet, documentation initiale | ✅ en place |
 | 2 | API de prédiction, tests, Dockerfile, pipeline CI/CD | ✅ en place |
 | 3 | Stockage des données de production + analyse du data drift | ✅ en place |
-| 4 | Profiling et optimisation des performances d'inférence | ⬜ à venir |
+| 4 | Profiling et optimisation des performances | ✅ en place — [`docs/optimisation.md`](docs/optimisation.md) |
 
 ## Structure du dépôt
 
@@ -51,18 +51,23 @@ la décision, sans toucher au reste du dossier.
 │   ├── config.py         #   réglages lus depuis l'environnement
 │   ├── model.py          #   chargement du modèle et inférence
 │   ├── schemas.py        #   contrat d'entrée/sortie (Pydantic → Swagger)
-│   ├── storage.py        #   journal des prédictions (stdout JSON + PostgreSQL)
+│   ├── storage.py        #   journal de production (stdout JSON + PostgreSQL)
+│   ├── tracking.py       #   middleware : identifiant, durée et journal de chaque requête
 │   └── main.py           #   routes et gestion des erreurs
 ├── src/                  # pipeline de features + entraînement (hérité de la Partie 1)
 │   └── export_model.py   #   pont MLflow → artefact déployable
 ├── scripts/
 │   ├── smoke_test.py     #   vérifie un service qui tourne (conteneur, déploiement)
-│   └── simuler_trafic.py #   alimente le journal de production en trafic réaliste
+│   ├── simuler_trafic.py #   alimente le journal de production en trafic réaliste
+│   ├── benchmark.py      #   latence par étape, profil cProfile, latence HTTP
+│   ├── comparer_images.py #  deux conteneurs côte à côte, mesures alternées
+│   ├── tester_charge.py  #   test de charge avec oha
+│   └── evaluer_onnx.py   #   ONNX Runtime face à LightGBM : fidélité et vitesse
 ├── notebooks/            # analyses Partie 1, puis notebook de data drift (étape 3)
 ├── tests/                # tests automatisés pytest
 ├── models/               # artefact déployable + paramètres de référence
 ├── monitoring/           # réservé aux exports locaux, non versionnés
-├── docs/                 # documentation et captures d'écran
+├── docs/                 # documentation, captures d'écran, mesures de performance (perf/)
 ├── data/                 # CSV Home Credit — NON versionnés, voir data/README.md
 ├── .github/workflows/    # pipeline CI/CD
 ├── Dockerfile            # image de l'API (multi-étapes, utilisateur non-root)
@@ -188,6 +193,9 @@ complet.
 | `MIN_APPLICATION_COVERAGE` | `0.5` | Part minimale du dossier de demande exigée. |
 | `MAX_BATCH_SIZE` | `1000` | Plafond du mode lot. |
 | `PORT` | `8000` | Port d'écoute (utilisé par les hébergeurs). |
+| `DATABASE_URL` | non défini | Base PostgreSQL du journal de production. Sans elle, journal sur stdout seulement. |
+| `WEB_CONCURRENCY` | `2` dans l'image | Nombre de workers uvicorn (un par vCPU). |
+| `OMP_NUM_THREADS` | `1` dans l'image | Threads OpenMP de LightGBM par worker. Voir [`docs/optimisation.md`](docs/optimisation.md). |
 
 ## Tests
 
@@ -196,7 +204,7 @@ uv run pytest                                    # suite complète
 uv run pytest --cov=api --cov-report=term-missing  # avec couverture
 ```
 
-68 tests, **100 % de couverture** sur `api/` (plancher CI : 95 %). Aucune donnée
+119 tests, **100 % de couverture** sur `api/` (plancher CI : 95 %). Aucune donnée
 client n'est versionnée : les dossiers de test sont générés de façon déterministe.
 Les tests de fidélité numérique sur de vrais clients s'ignorent d'eux-mêmes si les
 données de la Partie 1 ne sont pas disponibles.
@@ -230,6 +238,23 @@ Le déploiement n'est considéré comme réussi que si le Space passe à l'état
 et que `scripts/smoke_test.py` obtient une réponse correcte du service en ligne. Un
 build en échec arrête le pipeline au lieu de le laisser passer au vert.
 
+## Performances
+
+Trois goulots trouvés par la mesure, et corrigés : le contrôle des plages de valeurs
+(cProfile), le middleware HTTP, et surtout les threads OpenMP de LightGBM, qui dans un
+conteneur limité à 2 CPU en ouvraient autant que l'hôte a de cœurs. Sous charge (8
+connexions, conteneur à 2 CPU), le débit passe de 187 à 417 req/s et la latence p95 de 84 à
+41 ms. ONNX Runtime a été testé : deux fois plus rapide sur l'appel au modèle, mais ce gain
+ne représente qu'environ 3 % d'une requête, et les scores ne sont plus reproduits qu'à 7e-3
+près. Il n'est pas déployé.
+
+Méthode, chiffres et configuration retenue : [`docs/optimisation.md`](docs/optimisation.md).
+
+```bash
+uv run python scripts/benchmark.py etapes         # coût de chaque étape de /predict
+uv run python scripts/benchmark.py profil         # profil cProfile de la route
+```
+
 ## Pourquoi ces choix techniques
 
 FastAPI plutôt que Gradio, format texte natif plutôt que pickle, bornes de validation
@@ -239,9 +264,9 @@ et à quelle condition elle deviendrait mauvaise — dans
 
 ## Interpréter le monitoring
 
-L'API journalise **chaque prédiction rendue** sur deux canaux : une ligne JSON sur la
-sortie standard (toujours, sans valeur de feature) et une ligne en base PostgreSQL
-(avec les features, en `JSONB`). La documentation complète — schéma, requêtes types,
+L'API journalise **chaque prédiction rendue et chaque appel** (statut, durée) sur deux
+canaux : une ligne JSON sur la sortie standard (toujours, sans valeur de feature) et une
+ligne en base PostgreSQL (avec les features, en `JSONB`). La documentation complète — schéma, requêtes types,
 volumétrie mesurée, comportement en cas de panne — est dans
 [`docs/monitoring.md`](docs/monitoring.md).
 

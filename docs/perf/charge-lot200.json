@@ -1,0 +1,119 @@
+{
+  "date": "2026-09-10T15:35:06+00:00",
+  "commit": "01b5a8f",
+  "plateforme": "Windows-10-10.0.26200-SP0",
+  "python": "3.11.1",
+  "protocole": {
+    "outil": "ghcr.io/hatoo/oha:latest",
+    "route": "/predict/batch",
+    "duree": "15s",
+    "tours": 3,
+    "dossiers_par_requete": 200
+  },
+  "synthese_mediane_des_tours": {
+    "bench-avant": {
+      "1": {
+        "debit_req_s": 8.9,
+        "taux_succes": 1.0,
+        "p50": 96.4,
+        "p95": 201.21,
+        "p99": 281.7
+      }
+    },
+    "bench-omp14": {
+      "1": {
+        "debit_req_s": 11.0,
+        "taux_succes": 1.0,
+        "p50": 70.76,
+        "p95": 198.23,
+        "p99": 347.79
+      }
+    },
+    "bench-final": {
+      "1": {
+        "debit_req_s": 10.3,
+        "taux_succes": 1.0,
+        "p50": 81.38,
+        "p95": 157.31,
+        "p99": 273.01
+      }
+    }
+  },
+  "tours": {
+    "bench-avant": {
+      "1": [
+        {
+          "debit_req_s": 8.5,
+          "taux_succes": 1.0,
+          "p50": 95.77,
+          "p95": 236.79,
+          "p99": 281.7
+        },
+        {
+          "debit_req_s": 8.9,
+          "taux_succes": 1.0,
+          "p50": 96.4,
+          "p95": 196.2,
+          "p99": 263.02
+        },
+        {
+          "debit_req_s": 9.0,
+          "taux_succes": 1.0,
+          "p50": 97.12,
+          "p95": 201.21,
+          "p99": 398.51
+        }
+      ]
+    },
+    "bench-omp14": {
+      "1": [
+        {
+          "debit_req_s": 8.3,
+          "taux_succes": 1.0,
+          "p50": 105.98,
+          "p95": 251.88,
+          "p99": 355.72
+        },
+        {
+          "debit_req_s": 11.5,
+          "taux_succes": 1.0,
+          "p50": 70.76,
+          "p95": 188.88,
+          "p99": 240.71
+        },
+        {
+          "debit_req_s": 11.0,
+          "taux_succes": 1.0,
+          "p50": 70.0,
+          "p95": 198.23,
+          "p99": 347.79
+        }
+      ]
+    },
+    "bench-final": {
+      "1": [
+        {
+          "debit_req_s": 11.8,
+          "taux_succes": 1.0,
+          "p50": 70.38,
+          "p95": 146.41,
+          "p99": 436.41
+        },
+        {
+          "debit_req_s": 10.2,
+          "taux_succes": 1.0,
+          "p50": 87.81,
+          "p95": 157.31,
+          "p99": 187.66
+        },
+        {
+          "debit_req_s": 10.3,
+          "taux_succes": 1.0,
+          "p50": 81.38,
+          "p95": 217.06,
+          "p99": 273.01
+        }
+      ]
+    }
+  }
+}

@@ -5,23 +5,8 @@ description = "Mise en production du modèle de scoring de crédit Prêt à Dép
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 
-# Coeur d'inférence : le strict nécessaire pour CHARGER le modèle et prédire.
-# C'est ce bloc, et lui seul, qui part dans l'image Docker.
-#
-# Il ne contient volontairement ni scikit-learn, ni pandas, ni pyarrow : l'API
-# charge le modèle au format texte natif LightGBM et lui passe une matrice numpy.
-# Elle n'importe donc que `lightgbm` et `numpy` (vérifiable par grep sur api/).
-# Les embarquer « au cas où » ajoutait ~300 Mo à l'image pour du code jamais exécuté.
-#
-# lightgbm reste épinglé à la version de la Partie 1 : c'est elle qui a produit
-# l'artefact, et une version majeure différente pourrait interpréter le fichier
-# autrement.
-#
-# psycopg entre bien dans le cœur : l'API journalise ses prédictions en PostgreSQL,
-# donc l'image en a besoin. L'extra `binary` évite de compiler libpq au build (pas
-# de gcc ni de libpq-dev dans l'image), `pool` fournit le pool de connexions ouvert
-# une seule fois au démarrage. Coût : ~5 Mo, pour la seule dépendance de l'API qui
-# ne serve pas l'inférence.
+# Dépendances de l'API : ce sont les seules installées dans l'image Docker.
+# lightgbm reste à la version qui a produit l'artefact.
 dependencies = [
     "lightgbm==4.6.0",
     "numpy<2.3",
@@ -30,13 +15,10 @@ dependencies = [
     "psycopg[binary,pool]==3.2.12",
 ]
 
-# Dépendances hors production, installées à la demande (`uv sync --group <nom>`).
-# Elles n'entrent PAS dans l'image Docker.
+# Groupes hors image Docker : `uv sync --group <nom>`.
 [dependency-groups]
-# Reproduire l'entraînement de la Partie 1 et exporter un modèle déployable.
+# Entraînement de la Partie 1 et export du modèle.
 training = [
-    # Déplacés hors du cœur d'inférence : utilisés par src/ et les notebooks
-    # (préparation des données, entraînement), jamais par l'API.
     "scikit-learn==1.8.0",
     "pandas==2.3.3",
     "pyarrow==23.0.1",
@@ -51,9 +33,7 @@ training = [
     "jupyter==1.1.1",
     "ipykernel==7.2.0",
 ]
-# Outillage de dev : non épinglé, les versions exactes sont figées par uv.lock.
-# pandas/pyarrow y figurent pour les tests de fidélité sur données réelles, qui
-# relisent le parquet de la Partie 1 ; ils n'entrent pas dans l'image.
+# pandas/pyarrow : tests de fidélité sur les données réelles de la Partie 1.
 dev = [
     "httpx==0.28.1",
     "pandas==2.3.3",
@@ -62,19 +42,21 @@ dev = [
     "pytest-cov",
     "ruff",
 ]
-# Analyse du data drift (étape 3). Hors du cœur d'inférence : l'API n'importe jamais
-# Evidently, et l'image Docker n'en contient pas une ligne.
+# Analyse du data drift.
 monitoring = [
     "evidently==0.7.21",
+]
+# Évaluation d'ONNX Runtime (scripts/evaluer_onnx.py).
+perf = [
+    "onnx==1.22.0",
+    "onnxmltools==1.16.0",
+    "onnxruntime==1.29.0",
 ]
 
 [tool.uv]
 package = false
-# La Partie 1 était épinglée `sys_platform == 'win32'` : impossible de construire une
-# image Docker Linux avec ce lock. On résout donc pour Windows (poste de dev) ET Linux
-# (image Docker / runners GitHub Actions). macOS reste exclu — c'est la plateforme qui
-# dégradait la résolution en Partie 1 (shap -> numba<0.63 sur darwin x86_64) et on n'en
-# a pas l'usage ici.
+# Résolution Windows (poste de dev) et Linux (image, CI). La Partie 1 était
+# épinglée win32 seulement.
 environments = [
     "sys_platform == 'win32'",
     "sys_platform == 'linux'",
@@ -82,20 +64,13 @@ environments = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Le projet n'est pas packagé (`package = false`) : on rend la racine importable
-# pour que `from api... import ...` fonctionne dans les tests sans bricolage de sys.path.
 pythonpath = ["."]
 
 [tool.coverage.run]
-# On ne mesure que le code servi en production. Les scripts d'entraînement de la
-# Partie 1 (src/) ne sont pas déployés : les inclure diluerait le taux et masquerait
-# une baisse de couverture sur l'API.
 source = ["api"]
 
 [tool.coverage.report]
 show_missing = true
-# Plancher vérifié en CI. La suite est à 100 % ; 95 laisse la marge d'un ajout
-# ponctuel sans bloquer, mais interdit une dérive silencieuse.
 fail_under = 95
 
 [tool.ruff]

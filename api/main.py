@@ -8,21 +8,18 @@ from __future__ import annotations
 
 import logging
 import time
-import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Request, status
-from fastapi.concurrency import run_in_threadpool
+from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
-from starlette.background import BackgroundTask
 
 from api import config
-from api.model import ModelLoadError, Prediction, ScoringModel
+from api.model import Coverage, ModelLoadError, Prediction, ScoringModel
 from api.schemas import (
-    EXEMPLES_PREDICT,
+    PREDICT_EXAMPLES,
     BatchPredictionRequest,
     BatchPredictionResponse,
     CoverageInfo,
@@ -34,22 +31,27 @@ from api.schemas import (
     PredictionRequest,
     PredictionResponse,
 )
-from api.storage import PredictionLog, RequestRecord, build_record
+from api.storage import PredictionLog, PredictionRecord
+from api.tracking import RequestTrackingMiddleware
 
 logger = logging.getLogger("api")
 
-MAX_REPORTED_UNKNOWN = 10
-MAX_REPORTED_VALIDATION_ERRORS = 10
+# Au-delà, les messages d'erreur ne listent que les premiers éléments fautifs.
+MAX_REPORTED_ITEMS = 10
 
-# Routes dont chaque appel est journalisé. /health en est exclu : la sonde du
-# conteneur l'appelle toutes les 30 s et noierait le taux d'erreur.
-TRACKED_PATHS = frozenset({"/predict", "/predict/batch", "/model/info", "/features"})
+
+def _bounded_list(items: list[str], separator: str) -> str:
+    shown = separator.join(items[:MAX_REPORTED_ITEMS])
+    if len(items) > MAX_REPORTED_ITEMS:
+        shown += f" (et {len(items) - MAX_REPORTED_ITEMS} autres)"
+    return shown
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Modèle chargé une seule fois. Artefact absent => mode dégradé (/health en 503)
     # plutôt qu'un conteneur qui redémarre en boucle.
+    app.state.model_error = None
     try:
         app.state.model = ScoringModel.load()
         logger.info(
@@ -87,61 +89,17 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+app.add_middleware(RequestTrackingMiddleware)
 
 
-def _journaliser_requete(journal, record: RequestRecord) -> None:
-    try:
-        journal.record_request(record)
-    except Exception:
-        logger.exception("Journalisation de la requête impossible")
-
-
-@app.middleware("http")
-async def tag_request(request: Request, call_next):
-    request.state.request_id = str(uuid.uuid4())
-    debut = time.perf_counter()
-    suivie = request.url.path in TRACKED_PATHS
-
-    try:
-        response = await call_next(request)
-    except Exception:
-        # L'exception remonte jusqu'au handler 500 : on trace l'appel avant.
-        if suivie:
-            record = _request_record(request, 500, debut)
-            await run_in_threadpool(_journaliser_requete, request.app.state.prediction_log, record)
-        raise
-
-    response.headers["X-Request-ID"] = request.state.request_id
-    if suivie:
-        record = _request_record(request, response.status_code, debut)
-        response.background = BackgroundTask(
-            _journaliser_requete, request.app.state.prediction_log, record
-        )
-    return response
-
-
-def _request_record(request: Request, status_code: int, debut: float) -> RequestRecord:
-    return RequestRecord(
-        request_id=request.state.request_id,
-        occurred_at=datetime.now(UTC),
-        method=request.method,
-        path=request.url.path,
-        status_code=status_code,
-        duration_ms=(time.perf_counter() - debut) * 1000,
-    )
-
-
-def get_model(request: Request) -> ScoringModel:
-    model = getattr(request.app.state, "model", None)
-    if model is None:
+async def get_model(request: Request) -> ScoringModel:
+    state = request.app.state
+    if state.model is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "Modèle indisponible : "
-                f"{getattr(request.app.state, 'model_error', 'cause inconnue')}"
-            ),
+            detail=f"Modèle indisponible : {state.model_error}",
         )
-    return model
+    return state.model
 
 
 ModelDependency = Annotated[ScoringModel, Depends(get_model)]
@@ -154,19 +112,12 @@ async def validation_exception_handler(
     # Le handler par défaut recopie la valeur rejetée : NaN/Infinity rendent alors la
     # réponse non sérialisable (500), et des données client finissent dans les logs.
     problems = []
-    for error in exc.errors()[:MAX_REPORTED_VALIDATION_ERRORS]:
-        emplacement = ".".join(str(part) for part in error["loc"][1:]) or "corps de la requête"
-        problems.append(f"{emplacement} : {error['msg']}")
-
-    total = len(exc.errors())
-    extra = (
-        f" (et {total - MAX_REPORTED_VALIDATION_ERRORS} autres)"
-        if total > MAX_REPORTED_VALIDATION_ERRORS
-        else ""
-    )
+    for error in exc.errors():
+        location = ".".join(str(part) for part in error["loc"][1:]) or "corps de la requête"
+        problems.append(f"{location} : {error['msg']}")
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        content={"detail": f"Requête invalide — {' ; '.join(problems)}{extra}."},
+        content={"detail": f"Requête invalide — {_bounded_list(problems, ' ; ')}."},
     )
 
 
@@ -179,34 +130,26 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     )
 
 
-def _validate(model: ScoringModel, features: dict) -> None:
+def _validate(model: ScoringModel, features: dict) -> Coverage:
     unknown = model.unknown_features(features)
     if unknown:
-        shown = ", ".join(unknown[:MAX_REPORTED_UNKNOWN])
-        extra = (
-            f" (et {len(unknown) - MAX_REPORTED_UNKNOWN} autres)"
-            if len(unknown) > MAX_REPORTED_UNKNOWN
-            else ""
-        )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
-                f"{len(unknown)} feature(s) inconnue(s) du modèle : {shown}{extra}. "
+                f"{len(unknown)} feature(s) inconnue(s) du modèle : "
+                f"{_bounded_list(unknown, ', ')}. "
                 "La liste des features acceptées est exposée par GET /features."
             ),
         )
 
     out_of_range = model.out_of_range_features(features)
     if out_of_range:
-        shown = "; ".join(out_of_range[:MAX_REPORTED_UNKNOWN])
-        extra = (
-            f" (et {len(out_of_range) - MAX_REPORTED_UNKNOWN} autres)"
-            if len(out_of_range) > MAX_REPORTED_UNKNOWN
-            else ""
-        )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"{len(out_of_range)} valeur(s) hors plage : {shown}{extra}.",
+            detail=(
+                f"{len(out_of_range)} valeur(s) hors plage : "
+                f"{_bounded_list(out_of_range, '; ')}."
+            ),
         )
 
     coverage = model.coverage(features)
@@ -221,41 +164,39 @@ def _validate(model: ScoringModel, features: dict) -> None:
                 "d'historique de crédit, eux, peuvent rester absents."
             ),
         )
+    return coverage
 
 
-def _journaliser_sans_echec(journal, records) -> None:
-    try:
-        journal.record(records)
-    except Exception:
-        logger.exception("Journalisation des prédictions impossible")
-
-
-def _journaliser(
+def _prediction_records(
     request: Request,
-    background: BackgroundTasks,
     endpoint: str,
     rows: list[dict],
     predictions: list[Prediction],
     model: ScoringModel,
     latency_ms: float,
-) -> None:
-    # Écriture après l'envoi de la réponse : le monitoring n'entre pas dans la latence.
-    latence_unitaire = latency_ms / len(predictions) if predictions else latency_ms
-    records = [
-        build_record(
-            request_id=getattr(request.state, "request_id", "inconnu"),
+) -> list[PredictionRecord]:
+    # Écrits par RequestTrackingMiddleware une fois la réponse envoyée. Pour un lot,
+    # la latence est répartie sur ses dossiers.
+    per_row_ms = latency_ms / len(predictions)
+    now = datetime.now(UTC)
+    return [
+        PredictionRecord(
+            request_id=request.state.request_id,
+            occurred_at=now,
             endpoint=endpoint,
-            features=features,
-            probability=prediction.probability,
-            decision=prediction.decision,
-            coverage=prediction.coverage,
             model_version=model.version,
             threshold=model.threshold,
-            latency_ms=latence_unitaire,
+            probability=p.probability,
+            decision=p.decision,
+            features_provided=p.coverage.provided,
+            features_missing=p.coverage.missing,
+            application_ratio=p.coverage.application_ratio,
+            history_ratio=p.coverage.history_ratio,
+            latency_ms=per_row_ms,
+            features=features,  # payload tel que reçu, pas la ligne complétée à 779 colonnes
         )
-        for features, prediction in zip(rows, predictions)
+        for features, p in zip(rows, predictions, strict=True)
     ]
-    background.add_task(_journaliser_sans_echec, request.app.state.prediction_log, records)
 
 
 def _to_response(prediction: Prediction, model: ScoringModel) -> PredictionResponse:
@@ -274,7 +215,7 @@ def _to_response(prediction: Prediction, model: ScoringModel) -> PredictionRespo
 
 
 @app.get("/", include_in_schema=False)
-def racine() -> RedirectResponse:
+def root() -> RedirectResponse:
     return RedirectResponse(url="/docs")
 
 
@@ -285,28 +226,20 @@ def racine() -> RedirectResponse:
     summary="État du service",
     responses={503: {"model": HealthResponse, "description": "Modèle non chargé."}},
 )
-def health(request: Request) -> JSONResponse:
+def health(request: Request, response: Response) -> HealthResponse:
     """Répond 503 tant que le modèle n'est pas chargé.
 
     L'état du journal des prédictions est rapporté mais n'influence pas le code de
     statut : une base de monitoring en panne ne doit pas retirer l'API du trafic.
     """
-    journal = getattr(request.app.state, "prediction_log", None)
-    etat_journal = PredictionLogStatus(**journal.status()) if journal is not None else None
-
-    model = getattr(request.app.state, "model", None)
-    if model is None:
-        body = HealthResponse(status="degraded", model_loaded=False, prediction_log=etat_journal)
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=body.model_dump()
-        )
-    body = HealthResponse(
-        status="ok",
-        model_loaded=True,
-        model_version=model.version,
-        prediction_log=etat_journal,
+    state = request.app.state
+    log_status = PredictionLogStatus(**state.prediction_log.status())
+    if state.model is None:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return HealthResponse(status="degraded", model_loaded=False, prediction_log=log_status)
+    return HealthResponse(
+        status="ok", model_loaded=True, model_version=state.model.version, prediction_log=log_status
     )
-    return JSONResponse(status_code=status.HTTP_200_OK, content=body.model_dump())
 
 
 @app.get(
@@ -318,17 +251,8 @@ def health(request: Request) -> JSONResponse:
 )
 def model_info(model: ModelDependency) -> ModelInfoResponse:
     """Version, provenance, performances et règles d'acceptation du modèle en service."""
-    meta = model.metadata
     return ModelInfoResponse(
-        model_name=meta["model_name"],
-        model_version=meta["model_version"],
-        source_run_id=meta["source_run_id"],
-        exported_at=meta["exported_at"],
-        decision_threshold=meta["decision_threshold"],
-        threshold_rationale=meta["threshold_rationale"],
-        n_features=meta["n_features"],
-        n_trees=meta["n_trees"],
-        metrics=meta["metrics"],
+        **model.metadata,
         min_application_coverage=config.MIN_APPLICATION_COVERAGE,
         max_batch_size=config.MAX_BATCH_SIZE,
     )
@@ -341,7 +265,7 @@ def model_info(model: ModelDependency) -> ModelInfoResponse:
     summary="Contrat d'entrée : features acceptées",
     responses={503: {"model": ErrorResponse, "description": "Modèle non chargé."}},
 )
-def features(model: ModelDependency) -> FeaturesResponse:
+def list_features(model: ModelDependency) -> FeaturesResponse:
     """Liste des features acceptées, séparées entre dossier de demande et historique.
 
     Seules les features du dossier conditionnent l'acceptation d'une requête ; les
@@ -365,19 +289,18 @@ def features(model: ModelDependency) -> FeaturesResponse:
     },
 )
 def predict(
-    payload: Annotated[PredictionRequest, Body(openapi_examples=EXEMPLES_PREDICT)],
+    payload: Annotated[PredictionRequest, Body(openapi_examples=PREDICT_EXAMPLES)],
     model: ModelDependency,
     request: Request,
-    background: BackgroundTasks,
 ) -> PredictionResponse:
     """Renvoie la probabilité de défaut et la décision d'octroi au seuil métier."""
-    _validate(model, payload.features)
-    debut = time.perf_counter()
-    prediction = model.predict([payload.features])[0]
-    latence_ms = (time.perf_counter() - debut) * 1000
+    coverage = _validate(model, payload.features)
+    start = time.perf_counter()
+    prediction = model.predict([payload.features], [coverage])[0]
+    latency_ms = (time.perf_counter() - start) * 1000
 
-    _journaliser(
-        request, background, "/predict", [payload.features], [prediction], model, latence_ms
+    request.state.predictions = _prediction_records(
+        request, "/predict", [payload.features], [prediction], model, latency_ms
     )
     return _to_response(prediction, model)
 
@@ -396,7 +319,6 @@ def predict_batch(
     payload: BatchPredictionRequest,
     model: ModelDependency,
     request: Request,
-    background: BackgroundTasks,
 ) -> BatchPredictionResponse:
     """Score un lot de demandes en un seul appel au modèle (taille plafonnée)."""
     if len(payload.items) > config.MAX_BATCH_SIZE:
@@ -408,21 +330,23 @@ def predict_batch(
             ),
         )
 
-    rows = []
+    rows, coverages = [], []
     for position, item in enumerate(payload.items):
         try:
-            _validate(model, item.features)
+            coverages.append(_validate(model, item.features))
         except HTTPException as exc:
             raise HTTPException(
                 status_code=exc.status_code, detail=f"Demande n°{position} : {exc.detail}"
             ) from exc
         rows.append(item.features)
 
-    debut = time.perf_counter()
-    predictions = model.predict(rows)
-    latence_ms = (time.perf_counter() - debut) * 1000
+    start = time.perf_counter()
+    predictions = model.predict(rows, coverages)
+    latency_ms = (time.perf_counter() - start) * 1000
 
-    _journaliser(request, background, "/predict/batch", rows, predictions, model, latence_ms)
+    request.state.predictions = _prediction_records(
+        request, "/predict/batch", rows, predictions, model, latency_ms
+    )
     return BatchPredictionResponse(
         predictions=[_to_response(p, model) for p in predictions]
     )
