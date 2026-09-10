@@ -63,7 +63,6 @@ def charger_contexte():
 
     modele = ScoringModel.load()
     brut = json.dumps({"features": json.loads(EXEMPLE.read_text(encoding="utf-8"))}).encode()
-    features = json.loads(brut)["features"]
 
     def route():
         requete = PredictionRequest.model_validate_json(brut)
@@ -71,16 +70,22 @@ def charger_contexte():
         prediction = modele.predict([requete.features], [couverture])[0]
         return _to_response(prediction, modele).model_dump_json()
 
-    return modele, brut, features, route, _validate, PredictionRequest
+    return modele, brut, route
 
 
 def mesurer_etapes(repetitions: int) -> dict:
-    modele, brut, features, route, valider, schema = charger_contexte()
+    from api.main import _validate
+    from api.schemas import PredictionRequest
+
+    modele, brut, route = charger_contexte()
+    features = json.loads(brut)["features"]
     lot = [features] * TAILLE_LOT
 
     resultats = {
-        "validation_pydantic": chronometrer(lambda: schema.model_validate_json(brut), repetitions),
-        "controle_contrat": chronometrer(lambda: valider(modele, features), repetitions),
+        "validation_pydantic": chronometrer(
+            lambda: PredictionRequest.model_validate_json(brut), repetitions
+        ),
+        "controle_contrat": chronometrer(lambda: _validate(modele, features), repetitions),
         "inference_unitaire": chronometrer(lambda: modele.predict([features]), repetitions),
         "route_sans_http": chronometrer(route, repetitions),
     }
@@ -92,7 +97,7 @@ def mesurer_etapes(repetitions: int) -> dict:
 
 
 def profiler(repetitions: int, top: int, dump: Path | None) -> str:
-    *_, route, _, _ = charger_contexte()
+    _, _, route = charger_contexte()
     for _ in range(50):
         route()
     profil = cProfile.Profile()
@@ -107,7 +112,9 @@ def profiler(repetitions: int, top: int, dump: Path | None) -> str:
     return sortie.getvalue()
 
 
-def mesurer_http(url: str, repetitions: int, concurrence: int) -> dict:
+def mesurer_http(
+    url: str, repetitions: int, concurrence: int, seulement_concurrent: bool = False
+) -> dict:
     import httpx
 
     corps = json.dumps({"features": json.loads(EXEMPLE.read_text(encoding="utf-8"))})
@@ -124,7 +131,7 @@ def mesurer_http(url: str, repetitions: int, concurrence: int) -> dict:
                 durees.append((time.perf_counter() - debut) * 1000)
         return durees
 
-    resultats = {"sequentiel": percentiles(serie(repetitions))}
+    resultats = {} if seulement_concurrent else {"sequentiel": percentiles(serie(repetitions))}
     if concurrence > 1:
         debut = time.perf_counter()
         with ThreadPoolExecutor(concurrence) as pool:
@@ -158,7 +165,8 @@ def afficher(resultats: dict) -> None:
     print(f"{'':{largeur}}  {'p50':>9} {'p95':>9} {'p99':>9}  (ms)")
     for nom, stats in resultats.items():
         extra = f"   {stats['debit_req_s']} req/s" if "debit_req_s" in stats else ""
-        print(f"{nom:{largeur}}  {stats['p50']:9.3f} {stats['p95']:9.3f} {stats['p99']:9.3f}{extra}")
+        centiles = " ".join(f"{stats[c]:9.3f}" for c in ("p50", "p95", "p99"))
+        print(f"{nom:{largeur}}  {centiles}{extra}")
 
 
 def main() -> int:

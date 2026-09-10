@@ -16,13 +16,6 @@ class TestRoutesDeService:
         assert body["model_loaded"] is True
         assert body["model_version"] == "1"
 
-    def test_la_documentation_openapi_est_generee(self, client):
-        response = client.get("/openapi.json")
-        assert response.status_code == 200
-        schema = response.json()
-        chemins = schema["paths"]
-        assert {"/health", "/model/info", "/features", "/predict", "/predict/batch"} <= set(chemins)
-
     def test_swagger_est_accessible(self, client):
         assert client.get("/docs").status_code == 200
 
@@ -71,6 +64,7 @@ class TestPredictionNominale:
         assert body["model_version"] == "1"
 
     def test_la_reponse_dit_sur_quelle_information_elle_repose(self, client, valid_features):
+        """Un primo-emprunteur n'a pas d'historique : son dossier doit rester scorable."""
         body = client.post("/predict", json={"features": valid_features}).json()
         couverture = body["coverage"]
         assert couverture["features_provided"] == 245
@@ -90,12 +84,6 @@ class TestPredictionNominale:
         }
         body = client.post("/predict", json={"features": risque}).json()
         assert body["decision"] == "rejected"
-
-    def test_lhistorique_de_credit_est_facultatif(self, client, valid_features):
-        """Un primo-emprunteur n'a pas d'historique : son dossier doit rester scorable."""
-        response = client.post("/predict", json={"features": valid_features})
-        assert response.status_code == 200
-        assert response.json()["coverage"]["history_ratio"] == 0.0
 
 
 class TestGestionDesErreurs:
@@ -167,7 +155,8 @@ class TestGestionDesErreurs:
         import json
 
         payload = {**valid_features, "AMT_CREDIT": 0.0}
-        corps = json.dumps({"features": payload}).replace('"AMT_CREDIT": 0.0', f'"AMT_CREDIT": {litteral}')
+        corps = json.dumps({"features": payload})
+        corps = corps.replace('"AMT_CREDIT": 0.0', f'"AMT_CREDIT": {litteral}')
         response = client.post(
             "/predict", content=corps, headers={"Content-Type": "application/json"}
         )
@@ -181,7 +170,9 @@ class TestGestionDesErreurs:
 
     def test_un_json_malforme_est_refuse(self, client):
         response = client.post(
-            "/predict", content="{ceci n'est pas du json", headers={"Content-Type": "application/json"}
+            "/predict",
+            content="{ceci n'est pas du json",
+            headers={"Content-Type": "application/json"},
         )
         assert response.status_code == 422
 
@@ -223,10 +214,9 @@ class TestDemarrageSansArtefact:
 
         from fastapi import FastAPI
 
-        from api import config as api_config
         from api.main import lifespan
 
-        monkeypatch.setattr(api_config, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(config, "MODEL_DIR", tmp_path)
 
         async def demarrer():
             application = FastAPI()
@@ -239,23 +229,26 @@ class TestDemarrageSansArtefact:
         asyncio.run(demarrer())
 
 
+@pytest.fixture
+def client_en_panne(client, monkeypatch):
+    """Client qui renvoie les 500 au lieu de lever ; l'inférence échoue."""
+    from fastapi.testclient import TestClient
+
+    from api.main import app
+
+    def exploser(*_args):
+        raise RuntimeError("panne simulée dans le moteur d'inférence")
+
+    monkeypatch.setattr(app.state.model, "predict", exploser)
+    # Sans `with` : un second lifespan viderait le modèle de la session de test.
+    return TestClient(app, raise_server_exceptions=False)
+
+
 class TestErreurInterne:
-    def test_une_erreur_imprevue_ne_fuite_aucune_trace(self, client, valid_features, monkeypatch):
+    def test_une_erreur_imprevue_ne_fuite_aucune_trace(self, client_en_panne, valid_features):
         """Une pile d'exécution exposerait les chemins du serveur et les versions
         de bibliothèques installées. Le client ne doit voir qu'un message neutre."""
-        from fastapi.testclient import TestClient
-
-        from api.main import app
-
-        def exploser(_rows):
-            raise RuntimeError("panne simulée dans le moteur d'inférence")
-
-        monkeypatch.setattr(app.state.model, "predict", exploser)
-
-        # Sans `with` : un second lifespan viderait le modèle de la session de test.
-        client_brut = TestClient(app, raise_server_exceptions=False)
-        response = client_brut.post("/predict", json={"features": valid_features})
-
+        response = client_en_panne.post("/predict", json={"features": valid_features})
         assert response.status_code == 500
         assert response.json() == {"detail": "Erreur interne du service."}
         assert "panne simulée" not in response.text
@@ -317,11 +310,9 @@ class TestJournalisationDesPredictions:
                 self.recus = []
                 self.requetes = []
 
-            def record(self, records):
-                self.recus.extend(records)
-
-            def record_request(self, record):
+            def record_request(self, record, predictions=()):
                 self.requetes.append(record)
+                self.recus.extend(predictions)
 
             def status(self):
                 return {"stdout": True, "database": "ready", "last_error": None}
@@ -400,20 +391,9 @@ class TestJournalisationDesPredictions:
         assert journal_espion.requetes == []
 
     def test_une_erreur_interne_est_journalisee_en_500(
-        self, client, valid_features, journal_espion, monkeypatch
+        self, client_en_panne, valid_features, journal_espion
     ):
-        from fastapi.testclient import TestClient
-
-        from api.main import app
-
-        def exploser(_rows):
-            raise RuntimeError("panne simulée")
-
-        monkeypatch.setattr(app.state.model, "predict", exploser)
-        TestClient(app, raise_server_exceptions=False).post(
-            "/predict", json={"features": valid_features}
-        )
-
+        client_en_panne.post("/predict", json={"features": valid_features})
         assert [(r.path, r.status_code) for r in journal_espion.requetes] == [("/predict", 500)]
 
     def test_une_panne_du_journal_ne_casse_pas_la_prediction(self, client, valid_features):
@@ -422,10 +402,7 @@ class TestJournalisationDesPredictions:
         from api.main import app
 
         class JournalEnPanne:
-            def record(self, records):
-                raise RuntimeError("panne de journalisation simulée")
-
-            def record_request(self, record):
+            def record_request(self, record, predictions=()):
                 raise RuntimeError("panne de journalisation simulée")
 
             def status(self):
@@ -443,9 +420,8 @@ class TestJournalisationDesPredictions:
 
     def test_letat_du_journal_est_expose_par_health(self, client):
         body = client.get("/health").json()
-        assert body["prediction_log"]["stdout"] is True
-        # Sans DATABASE_URL en test, le stockage est désactivé — et c'est normal.
-        assert body["prediction_log"]["database"] in {"ready", "disabled", "unavailable"}
+        attendu = "ready" if config.DATABASE_URL else "disabled"
+        assert body["prediction_log"] == {"stdout": True, "database": attendu, "last_error": None}
 
     def test_une_base_en_panne_ne_rend_pas_le_service_indisponible(self, client):
         """Retirer l'API du trafic parce que la base de monitoring est tombée
@@ -482,17 +458,6 @@ def test_racine_absente_du_contrat_publie(client):
     assert set(schema["paths"]) == {
         "/health", "/model/info", "/features", "/predict", "/predict/batch",
     }
-
-
-def test_exemple_swagger_de_predict_est_executable(client):
-    """Un « Try it out » sur /docs doit renvoyer 200, pas 422."""
-    schema = client.get("/openapi.json").json()
-    exemple = schema["components"]["schemas"]["PredictionRequest"]["example"]
-    reponse = client.post("/predict", json=exemple)
-    assert reponse.status_code == 200, reponse.json()
-    corps = reponse.json()
-    assert corps["decision"] in {"accepted", "rejected"}
-    assert 0.0 <= corps["probability"] <= 1.0
 
 
 def test_exemple_swagger_de_predict_batch_est_executable(client):

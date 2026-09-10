@@ -249,40 +249,46 @@ class PredictionLog:
 
     def record(self, records: Sequence[PredictionRecord]) -> None:
         """Journalise un lot de prédictions. Ne lève jamais."""
-        self._record(INSERT_SQL, records)
+        self._record([(INSERT_SQL, records)])
 
-    def record_request(self, record: RequestRecord) -> None:
-        """Journalise une requête HTTP. Ne lève jamais."""
-        self._record(INSERT_REQUEST_SQL, [record])
+    def record_request(
+        self, request: RequestRecord, predictions: Sequence[PredictionRecord] = ()
+    ) -> None:
+        """Journalise une requête HTTP et les prédictions qu'elle a produites, en une
+        seule transaction. Ne lève jamais."""
+        self._record([(INSERT_SQL, predictions), (INSERT_REQUEST_SQL, [request])])
 
-    def _record(self, sql: str, records: Sequence[PredictionRecord | RequestRecord]) -> None:
-        if not records:
+    def _record(self, batches: list[tuple[str, Sequence]]) -> None:
+        batches = [(sql, records) for sql, records in batches if records]
+        if not batches:
             return
 
-        for record in records:
-            self._channel.info(json.dumps(record.summary(), ensure_ascii=False))
+        for _, records in batches:
+            for record in records:
+                self._channel.info(json.dumps(record.summary(), ensure_ascii=False))
 
         if self._pool is None:
             return
 
         try:
-            self._write(sql, records)
+            self._write(batches)
             self.last_error = None
         except Exception as exc:  # noqa: BLE001
             self.last_error = _describe(exc)
             logger.warning(
                 "Journal de production : %d ligne(s) non stockée(s) — %s",
-                len(records),
+                sum(len(records) for _, records in batches),
                 self.last_error,
             )
 
-    def _write(self, sql: str, records: Sequence[PredictionRecord | RequestRecord]) -> None:
+    def _write(self, batches: list[tuple[str, Sequence]]) -> None:
         with self._pool.connection(timeout=config.DB_WRITE_TIMEOUT) as conn:
             if not self._schema_ready:
                 conn.execute(SCHEMA_SQL)
                 self._schema_ready = True
             with conn.cursor() as cur:
-                cur.executemany(sql, [r.row() for r in records])
+                for sql, records in batches:
+                    cur.executemany(sql, [r.row() for r in records])
 
     def _prepare_schema(self) -> None:
         with self._pool.connection(timeout=config.DB_WRITE_TIMEOUT) as conn:

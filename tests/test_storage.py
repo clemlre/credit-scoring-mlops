@@ -128,6 +128,15 @@ class TestJournalDesRequetes:
         assert "INSERT INTO requests" in sql
         assert lignes == [enregistrement.row()]
 
+    def test_une_requete_et_ses_predictions_partent_ensemble(self, record):
+        journal = PredictionLog("postgresql://simule")
+        journal._pool = FakePool()
+        journal.record_request(requete(status_code=200), [record, record])
+
+        tables = [sql.split()[2] for sql, _ in journal._pool.inserted]
+        assert tables == ["predictions", "requests"]
+        assert [len(lignes) for _, lignes in journal._pool.inserted] == [2, 1]
+
     def test_le_schema_cree_les_deux_tables(self):
         journal = PredictionLog("postgresql://simule")
         journal._pool = FakePool()
