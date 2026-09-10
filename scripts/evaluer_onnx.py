@@ -4,7 +4,11 @@ La fidélité est mesurée sur les dossiers réels de la Partie 1 (hors dépôt)
 vitesse sur un dossier unitaire et sur un lot, à un thread de calcul comme en
 production (OMP_NUM_THREADS=1).
 
-    uv run --group perf python scripts/evaluer_onnx.py [--lignes 50000] [--sortie docs/perf/onnx.json]
+    P6_PROJECT_ROOT=... uv run --group perf python scripts/evaluer_onnx.py \
+        [--lignes 50000] [--sortie docs/perf/onnx.json]
+
+`--sans-donnees` ne mesure que la vitesse, sur l'exemple de Swagger : utile pour
+rejouer la mesure dans un conteneur Linux, sans les données de la Partie 1.
 """
 
 from __future__ import annotations
@@ -12,17 +16,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from pathlib import Path
 
 import numpy as np
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from benchmark import chronometrer, contexte_de_mesure
-
-P6_DEFAUT = r"C:\Users\ClementLoire\Documents\OpenClassrooms\P6 - Initiez-vous au MLOps 1-2"
+from benchmark import PROJECT_ROOT, chronometrer, contexte_de_mesure
 
 
 def convertir(booster, n_features: int):
@@ -52,7 +49,10 @@ def session(modele_onnx):
 def dossiers_reels(noms: list[str], lignes: int) -> np.ndarray:
     import pandas as pd
 
-    parquet = Path(os.environ.get("P6_PROJECT_ROOT", P6_DEFAUT)) / "output" / "feature_dataset.parquet"
+    racine = os.environ.get("P6_PROJECT_ROOT")
+    if not racine:
+        raise SystemExit("Définir P6_PROJECT_ROOT (racine du projet de la Partie 1).")
+    parquet = Path(racine) / "output" / "feature_dataset.parquet"
     if not parquet.exists():
         raise SystemExit(f"Parquet de la Partie 1 introuvable : {parquet}")
     frame = pd.read_parquet(parquet)
@@ -64,9 +64,25 @@ def dossiers_reels(noms: list[str], lignes: int) -> np.ndarray:
     return X.to_numpy()
 
 
+def mesurer_fidelite(booster, onnx_predict, X: np.ndarray, seuil: float) -> dict:
+    reference = booster.predict(X)
+    obtenu = np.concatenate([onnx_predict(X[i : i + 5000]) for i in range(0, len(X), 5000)])
+    ecart = np.abs(obtenu - reference)
+    divergentes = (reference >= seuil) != (obtenu >= seuil)
+    return {
+        "dossiers": len(X),
+        "ecart_max": float(ecart.max()),
+        "ecart_moyen": float(ecart.mean()),
+        "ecart_p99": float(np.quantile(ecart, 0.99)),
+        "dossiers_ecart_sup_1e-4": int((ecart > 1e-4).sum()),
+        "decisions_divergentes": int(divergentes.sum()),
+    }
+
+
 def main() -> int:
     parseur = argparse.ArgumentParser(description=__doc__)
     parseur.add_argument("--lignes", type=int, default=50_000)
+    parseur.add_argument("--sans-donnees", action="store_true")
     parseur.add_argument("--sortie", type=Path)
     args = parseur.parse_args()
 
@@ -80,20 +96,13 @@ def main() -> int:
     def onnx_predict(X: np.ndarray) -> np.ndarray:
         return sess.run(["probabilities"], {"input": X.astype(np.float32)})[0][:, 1]
 
-    X = dossiers_reels(modele.feature_names, args.lignes)
-    reference = booster.predict(X)
-    obtenu = np.concatenate([onnx_predict(X[i : i + 5000]) for i in range(0, len(X), 5000)])
-    ecart = np.abs(obtenu - reference)
-    divergentes = (reference >= seuil) != (obtenu >= seuil)
-
-    fidelite = {
-        "dossiers": len(X),
-        "ecart_max": float(ecart.max()),
-        "ecart_moyen": float(ecart.mean()),
-        "ecart_p99": float(np.quantile(ecart, 0.99)),
-        "dossiers_ecart_sup_1e-4": int((ecart > 1e-4).sum()),
-        "decisions_divergentes": int(divergentes.sum()),
-    }
+    if args.sans_donnees:
+        exemple = json.loads((PROJECT_ROOT / "api" / "exemple_dossier_refuse.json").read_text())
+        X = modele._to_matrix([exemple] * 200)
+        fidelite = None
+    else:
+        X = dossiers_reels(modele.feature_names, args.lignes)
+        fidelite = mesurer_fidelite(booster, onnx_predict, X, seuil)
 
     unitaire, lot = X[:1], X[:200]
     vitesse = {

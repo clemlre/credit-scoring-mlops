@@ -1,0 +1,45 @@
+{
+  "date": "2026-09-10T15:21:44+00:00",
+  "commit": "01b5a8f",
+  "plateforme": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.36",
+  "python": "3.11.16",
+  "fidelite": null,
+  "vitesse_ms": {
+    "lightgbm_unitaire": {
+      "n": 3000,
+      "p50": 0.0876,
+      "p95": 0.2605,
+      "p99": 0.6423,
+      "moyenne": 0.1226
+    },
+    "onnx_unitaire": {
+      "n": 3000,
+      "p50": 0.0301,
+      "p95": 0.1119,
+      "p99": 0.2509,
+      "moyenne": 0.0451
+    },
+    "lightgbm_lot_200": {
+      "n": 200,
+      "p50": 9.0334,
+      "p95": 31.2109,
+      "p99": 37.2309,
+      "moyenne": 11.2045
+    },
+    "onnx_lot_200": {
+      "n": 200,
+      "p50": 5.6772,
+      "p95": 13.5924,
+      "p99": 17.9598,
+      "moyenne": 6.8202
+    }
+  },
+  "operateurs_onnx": [
+    "Cast",
+    "Identity",
+    "Mul",
+    "TreeEnsembleClassifier"
+  ],
+  "taille_onnx_mo": 3.78,
+  "taille_lightgbm_mo": 5.68
+}
