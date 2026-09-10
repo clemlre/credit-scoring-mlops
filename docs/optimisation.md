@@ -33,7 +33,7 @@ Desktop, environ 3 ms sur ce poste.
 
 **Lot de 200 dossiers** (`docs/perf/charge-lot200.json`) : 96 ms avant, 81 ms après.
 
-**Pas de régression** : les 119 tests passent, dont la fidélité exacte au modèle sur des
+**Pas de régression** : la suite de tests complète passe, dont la fidélité exacte au modèle sur des
 clients réels. Les probabilités renvoyées par les deux images sont identiques au bit près
 sur 20 dossiers comparés : le modèle et son format n'ont pas changé.
 
@@ -214,13 +214,23 @@ seuils, c'est-à-dire ce que fait déjà la conversion ONNX, dont l'effet est me
 
 ## Et en production ?
 
-Mesuré depuis le poste de développement contre le Space, avant déploiement de cette version
-(`docs/perf/hf-avant.json`) : 110 ms en médiane, 149 ms au p95. Le temps serveur n'en
-représente que 2 à 3 ms ; le reste est le réseau entre le poste et Hugging Face. Pour un
-utilisateur isolé, l'optimisation est invisible. Elle compte sous charge (débit, p95) et pour
-le coût : à trafic égal, il faut deux fois moins de CPU.
+Même mesure depuis le poste de développement contre le Space, avant et après le
+déploiement de cette version (400 requêtes séquentielles, puis 400 avec 8 clients) :
 
-Après déploiement, la même mesure se relance ainsi :
+| | Avant (`hf-avant.json`) | Après (`hf-apres.json`) |
+|---|---:|---:|
+| p50, séquentiel | 110,4 ms | 111,7 ms |
+| p95, séquentiel | 148,7 ms | 121,9 ms |
+| Débit, 8 clients | 51,4 req/s | 50,6 req/s |
+
+Aucune différence visible, et c'est attendu : le temps serveur ne représente que 2 à 3 ms
+de ces 110 ms, le reste est le réseau entre le poste et Hugging Face. Avec 8 clients, le
+débit est borné par ce même aller-retour réseau (8 connexions × ~9 réponses par seconde),
+pas par le service. L'optimisation ne se voit donc qu'au plus près du serveur, ce que
+mesurent les tests en conteneur ci-dessus : elle compte sous charge et pour le coût (à
+trafic égal, deux fois moins de CPU), pas pour un utilisateur isolé.
+
+Pour la relancer :
 
 ```bash
 uv run python scripts/benchmark.py http https://clemlre-credit-scoring-api.hf.space \

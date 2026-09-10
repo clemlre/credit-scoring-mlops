@@ -1,0 +1,26 @@
+{
+  "etiquette": "apres - Space Hugging Face cpu-basic (main apres la PR #13)",
+  "mode": "http",
+  "cible": "https://clemlre-credit-scoring-api.hf.space",
+  "date": "2026-09-10T18:30:31+00:00",
+  "commit": "433b2a5",
+  "plateforme": "Windows-10-10.0.26200-SP0",
+  "python": "3.11.1",
+  "resultats": {
+    "sequentiel": {
+      "n": 400,
+      "p50": 111.6804,
+      "p95": 121.8752,
+      "p99": 178.657,
+      "moyenne": 113.5548
+    },
+    "concurrence_8": {
+      "n": 400,
+      "p50": 113.8837,
+      "p95": 135.8203,
+      "p99": 185.0951,
+      "moyenne": 117.7722,
+      "debit_req_s": 50.6
+    }
+  }
+}
