@@ -4,8 +4,8 @@
 # Environnements et caches
 .venv/
 venv/
-__pycache__/
-*.py[cod]
+**/__pycache__/
+**/*.py[cod]
 .pytest_cache/
 .ruff_cache/
 .coverage
