@@ -43,7 +43,7 @@ Séparer les deux tables évite de mélanger deux grains : un appel `/predict/ba
                           ┌──────────────────────────────────────┐
    POST /predict ────────▶│  API (réponse renvoyée immédiatement) │
                           └──────────────┬───────────────────────┘
-                                         │ BackgroundTasks (après la réponse)
+                                         │ middleware, après la réponse    
                           ┌──────────────┴───────────────┐
                           ▼                              ▼
              stdout, JSON par ligne            PostgreSQL (predictions, requests)
@@ -117,10 +117,11 @@ petite instance ; au-delà, on archiverait les partitions anciennes.
 Décision structurante : **une panne de monitoring n'est pas une panne de
 production.**
 
-- L'écriture a lieu dans une tâche d'arrière-plan, *après* l'envoi de la réponse :
-  le temps de réponse ne dépend pas de la base.
-- Toute exception y est absorbée à deux niveaux (`PredictionLog.record`, puis
-  `_journaliser_sans_echec` dans `api/main.py`).
+- L'écriture a lieu *après* l'envoi de la réponse, dans le middleware
+  (`api/tracking.py`), en une transaction pour la requête et ses prédictions : le temps
+  de réponse ne dépend pas de la base.
+- Toute exception y est absorbée à deux niveaux (`PredictionLog.record_request`, puis
+  `_write_log` dans `api/tracking.py`).
 - `GET /health` **reste à 200** et signale l'état dans `prediction_log.database` :
 
 ```json
@@ -248,6 +249,64 @@ SELECT occurred_at, probability, decision, threshold, model_version, features
 FROM predictions
 WHERE request_id = '0eab2763-b69c-4e49-9301-ffcea0411d00';
 ```
+
+## Tableau de bord
+
+`monitoring/dashboard.py` est une application Streamlit branchée directement sur la base.
+
+```bash
+uv sync --group monitoring
+uv run --group monitoring streamlit run monitoring/dashboard.py
+# DATABASE_URL pour viser une autre base que celle de docker-compose.yml
+```
+
+Elle n'écoute que sur `127.0.0.1` (`.streamlit/config.toml`) : elle affiche des données
+clients et n'a pas à être joignable depuis le réseau.
+
+**Ce qu'elle montre**, sur une fenêtre choisie (dernière heure, 24 h, 7 jours…) :
+
+| Zone | Contenu | Source |
+|---|---|---|
+| Alertes | erreurs 5xx, taux de 4xx > 5 %, latence p95 > 100 ms, dérive significative | calculées par `monitoring/indicateurs.py` |
+| Cartes | appels, taux d'erreur, latence p95 de `/predict`, prédictions, taux de refus, nombre de features en dérive | `requests`, `predictions` |
+| Activité et erreurs | appels par minute (ou heure) colorés par classe de statut, détail des erreurs par route | `requests` |
+| Scores et décisions | distribution des probabilités avec le seuil de 0,10, taux de refus dans le temps | `predictions` |
+| Latence | p50 et p95 de `POST /predict` dans le temps, médiane de l'inférence seule | `requests`, `predictions` |
+| Dérive des données | PSI des 20 features suivies, taux de manquants référence contre production | `predictions.features` |
+
+**La référence de dérive** est `monitoring/profil_reference.json` : les déciles des 20
+features au plus fort gain, calculés sur les mêmes 20 000 dossiers d'entraînement que le
+notebook. Il ne contient aucune ligne client, seulement des bornes et des proportions,
+et se reconstruit avec `monitoring/construire_reference.py` quand le modèle change. Le PSI
+est calculé par déciles de la référence : les valeurs sont du même ordre que celles
+d'Evidently dans le notebook, sans être identiques (le découpage des classes diffère).
+
+Les seuils d'alerte sont des constantes de `monitoring/indicateurs.py`, testées dans
+`tests/test_indicateurs.py`.
+
+**Analyser une période précise** : ajouter `?du=…&au=…` à l'URL, en ISO 8601 (UTC par
+défaut), par exemple `http://127.0.0.1:8501/?du=2026-09-10T15:59Z&au=2026-09-10T16:04Z`.
+C'est ce qui sert à relire un incident passé, ou à envoyer à quelqu'un le lien exact de
+la fenêtre à regarder.
+
+### Captures du tableau de bord
+
+Scénario rejoué le 10 septembre contre l'API optimisée (2 workers), dans une base dédiée
+`monitoring_demo` : 1 500 dossiers réels en lots, puis 7 minutes de trafic unitaire
+nominal, puis 4 minutes de trafic dont les scores externes sont décalés de 0,2 ; 2 % des
+dossiers sont volontairement invalides tout du long.
+
+| Fichier | Ce qu'il montre |
+|---|---|
+| `dashboard-1-activite.png` | 2 633 appels par minute, 2,5 % de 422 (les dossiers invalides), aucune 500 |
+| `dashboard-2-scores.png` | la distribution des scores et le taux de refus, qui passe d'environ 20 % à 47 % au début du trafic décalé |
+| `dashboard-3-latence.png` | `POST /predict` stable autour de 4 ms en p50 et 7 à 8 ms en p95, inférence seule 0,8 ms |
+| `dashboard-4-derive.png` | sur tout le scénario : seule `PAYMENT_RATE` dérive franchement (déjà relevé dans le notebook), les scores externes restent sous 0,25 car le trafic décalé n'en est qu'un cinquième |
+| `dashboard-5-derive-trafic-decale.png` | sur la seule phase décalée : les trois `EXT_SOURCE` en dérive significative (PSI 3,0, 2,3 et 1,4), taux de refus 45,6 % |
+
+La capture 5 recoupe la fenêtre B du notebook (PSI 3,04, 2,17 et 1,69, refus 45,0 %)
+avec un autre calcul de PSI et d'autres dossiers : les deux instruments disent la même
+chose.
 
 ## Console graphique et captures d'écran
 

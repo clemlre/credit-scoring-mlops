@@ -42,9 +42,11 @@ dev = [
     "pytest-cov",
     "ruff",
 ]
-# Analyse du data drift.
+# Analyse du data drift et tableau de bord de monitoring.
 monitoring = [
     "evidently==0.7.21",
+    "pandas==2.3.3",
+    "streamlit==1.63.0",
 ]
 # Évaluation d'ONNX Runtime (scripts/evaluer_onnx.py).
 perf = [
@@ -67,7 +69,9 @@ testpaths = ["tests"]
 pythonpath = ["."]
 
 [tool.coverage.run]
-source = ["api"]
+source = ["api", "monitoring"]
+# Interface Streamlit et script ponctuel : vérifiés à l'exécution, pas par pytest.
+omit = ["monitoring/dashboard.py", "monitoring/construire_reference.py"]
 
 [tool.coverage.report]
 show_missing = true
@@ -75,3 +79,10 @@ fail_under = 95
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Code d'entraînement repris de la Partie 1, non déployé.
+"src/{optimize_lgbm,prepare_data,run_mlp_activations,run_step2_baselines,run_step3_models,training}.py" = ["E501", "SIM300", "W292"]

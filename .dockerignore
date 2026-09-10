@@ -1,8 +1,5 @@
-# Ce qui ne doit jamais entrer dans le contexte de build.
-#
-# Sans ce fichier, Docker envoie tout le répertoire au démon avant même de lire le
-# Dockerfile : les données Kaggle (2,6 Go) et le venv local partiraient à chaque
-# build, pour finir ignorés. Le contexte doit rester de l'ordre du méga-octet.
+# Contexte de build réduit au strict nécessaire (sans lui, les 2,6 Go de données
+# Kaggle et le venv partiraient au démon à chaque build).
 
 # Environnements et caches
 .venv/
@@ -29,6 +26,7 @@ docs/
 monitoring/
 src/
 scripts/
+.streamlit/
 
 # Modèles au format non déployé (seul credit_default_lgbm.txt part dans l'image)
 models/*.pkl

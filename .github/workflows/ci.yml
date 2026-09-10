@@ -1,8 +1,5 @@
 name: CI/CD
 
-# Déclenché sur `main` (exigence du projet), mais aussi sur les pull requests qui
-# la visent : détecter une régression avant la fusion vaut mieux que la détecter
-# après. `workflow_dispatch` permet de relancer le pipeline à la main.
 on:
   push:
     branches: [main]
@@ -10,8 +7,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Une nouvelle poussée sur la même branche annule le run précédent : inutile de
-# payer une CI complète pour un commit déjà remplacé.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -21,24 +16,17 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # --------------------------------------------------------------------------
   qualite:
     name: Lint et tests
     runs-on: ubuntu-latest
 
-    # PostgreSQL éphémère, monté le temps du job. Sans lui, les tests d'intégration
-    # du journal des prédictions seraient `skipped` en CI : le pipeline validerait
-    # la logique du code sans jamais vérifier que le SQL est exécutable.
+    # PostgreSQL éphémère pour les tests d'intégration du stockage. Le mot de passe
+    # n'est pas un secret : la base n'existe que le temps du job.
     services:
       postgres:
         image: postgres:17-alpine
         env:
           POSTGRES_USER: scoring
-          # Ce mot de passe n'est PAS un secret et n'a pas à en être un : le service
-          # vit le temps du job, sur le réseau privé du runner, et n'est joignable
-          # de nulle part ailleurs. Le mettre dans les secrets du dépôt donnerait
-          # l'illusion d'une protection sans rien protéger. Le vrai secret, c'est
-          # DATABASE_URL en production.
           POSTGRES_PASSWORD: postgres_ci
           POSTGRES_DB: monitoring
         ports:
@@ -62,24 +50,15 @@ jobs:
         run: uv python install 3.11
 
       - name: Installer les dépendances
-        # --frozen : le lock fait foi. Si pyproject.toml a changé sans que le lock
-        # soit régénéré, le pipeline échoue ici plutôt que de tester autre chose
-        # que ce qui sera déployé.
         run: uv sync --frozen
 
       - name: Vérifier le style
-        run: uv run ruff check api tests src scripts
+        run: uv run ruff check api monitoring tests src scripts
 
       - name: Lancer les tests avec mesure de couverture
-        # Le plancher de couverture (95 %) est défini dans pyproject.toml et
-        # appliqué par coverage lui-même : le job échoue si la couverture baisse.
-        #
-        # DATABASE_URL active les tests d'intégration du journal des prédictions
-        # contre le service PostgreSQL ci-dessus. Sans cette variable ils seraient
-        # simplement ignorés — et un test ignoré ne prouve rien.
         env:
           DATABASE_URL: postgresql://scoring:postgres_ci@localhost:5432/monitoring
-        run: uv run pytest --cov=api --cov-report=term-missing --cov-report=xml
+        run: uv run pytest --cov --cov-report=term-missing --cov-report=xml
 
       - name: Publier le rapport de couverture
         if: always()
@@ -89,7 +68,6 @@ jobs:
           path: coverage.xml
           if-no-files-found: warn
 
-  # --------------------------------------------------------------------------
   image:
     name: Image Docker
     needs: qualite
@@ -107,21 +85,15 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          # Chargée dans le démon local : on la teste pour de vrai avant d'envisager
-          # de la publier. Une image qui se construit n'est pas une image qui marche.
           load: true
           tags: credit-scoring-api:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Démarrer le conteneur
-        run: |
-          docker run -d --name api-ci -p 8000:8000 credit-scoring-api:ci
-          echo "Conteneur démarré."
+        run: docker run -d --name api-ci -p 8000:8000 credit-scoring-api:ci
 
       - name: Tester le service qui tourne
-        # Teste le conteneur réel : disponibilité, chargement du modèle, prédiction
-        # cohérente avec le seuil, et refus d'une entrée invalide.
         run: python scripts/smoke_test.py http://127.0.0.1:8000
 
       - name: Récupérer les journaux du conteneur
@@ -132,19 +104,16 @@ jobs:
         if: always()
         run: docker rm -f api-ci
 
-      # --- Publication : uniquement depuis main, jamais depuis une pull request ---
       - name: S'authentifier auprès du registre
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          # Jeton fourni automatiquement par GitHub, à la durée de vie du job.
-          # Aucun identifiant n'est écrit dans le dépôt.
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Calculer les étiquettes de l'image
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main'
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -154,7 +123,7 @@ jobs:
             type=sha,format=long
 
       - name: Publier l'image
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -163,44 +132,19 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
 
-  # --------------------------------------------------------------------------
   deploiement:
     name: Déploiement
     needs: image
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      # `fetch-depth: 0` : le checkout par défaut est un clone superficiel, et un
-      # dépôt superficiel ne peut pas être poussé vers un autre serveur Git — le
-      # Space rejetterait la poussée (« shallow update not allowed »).
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Vérifier la présence des identifiants de déploiement
-        id: verif
-        # Un secret ne peut pas être testé dans un `if:` de job : on l'évalue ici,
-        # et les étapes suivantes s'appuient sur le résultat. Le secret n'est jamais
-        # affiché, seulement sa présence.
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_SPACE: ${{ vars.HF_SPACE }}
-        run: |
-          if [ -n "$HF_TOKEN" ] && [ -n "$HF_SPACE" ]; then
-            echo "configure=true" >> "$GITHUB_OUTPUT"
-            echo "Identifiants présents : déploiement vers $HF_SPACE."
-          else
-            echo "configure=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Déploiement ignoré — définissez le secret HF_TOKEN et la variable HF_SPACE pour l'activer."
-          fi
-
       - name: Préparer la configuration du Space
-        if: steps.verif.outputs.configure == 'true'
-        # Hugging Face lit la configuration du Space dans un en-tête YAML placé en tête
-        # du README. On le génère ici plutôt que de le committer : le README du dépôt
-        # GitHub reste lisible, et la configuration de déploiement reste au bon endroit,
-        # c'est-à-dire dans le pipeline. `app_port` doit correspondre au port exposé par
-        # le Dockerfile, sinon le Space se construit puis répond « no healthy upstream ».
+        # En-tête YAML attendu par Hugging Face en tête du README. Les captures
+        # d'écran sont retirées : le Space refuse les binaires hors Xet.
         run: |
           {
             echo "---"
@@ -216,48 +160,28 @@ jobs:
             cat README.md
           } > README.space.md
           mv README.space.md README.md
-
-          # Hugging Face refuse les fichiers binaires poussés en Git ordinaire : il
-          # impose son stockage Xet. Les captures d'écran sont un livrable du dépôt
-          # GitHub, pas un élément d'exécution du service — on les retire de l'arbre
-          # envoyé au Space plutôt que d'ajouter une dépendance de stockage à un
-          # service qui n'en a aucun besoin.
           rm -rf docs/screenshots
 
       - name: Déployer sur Hugging Face Spaces
-        if: steps.verif.outputs.configure == 'true'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_SPACE: ${{ vars.HF_SPACE }}
+        # Instantané sans historique : HF rejette tout blob binaire présent dans
+        # l'historique poussé.
         run: |
+          : "${HF_TOKEN:?secret HF_TOKEN absent}" "${HF_SPACE:?variable HF_SPACE absente}"
           git config user.email "ci@users.noreply.github.com"
           git config user.name "CI"
-
-          # Le Space reçoit un **instantané**, pas l'historique du dépôt. Deux raisons.
-          # D'abord Hugging Face inspecte tout l'historique poussé et refuse le moindre
-          # blob binaire : supprimer les captures d'écran dans le dernier commit ne
-          # suffit pas, elles restent dans les commits qui les ont ajoutées. Ensuite le
-          # Space n'a aucun usage de l'historique GitHub — il lui faut de quoi bâtir une
-          # image, pas de quoi faire de l'archéologie.
           git checkout --orphan deploiement
           git add -A
           git commit -m "Deploiement automatique depuis ${GITHUB_REPOSITORY}@${GITHUB_SHA}"
-
-          # Le jeton passe par l'URL distante, jamais par un fichier du dépôt, et
-          # n'apparaît pas dans les journaux (GitHub masque la valeur du secret).
           git remote add space "https://oauth2:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}"
           git push --force space deploiement:main
 
       - name: Vérifier le service déployé
-        if: steps.verif.outputs.configure == 'true'
         env:
           HF_SPACE: ${{ vars.HF_SPACE }}
         run: |
-          # Un déploiement n'est terminé que quand le service répond. Plutôt que
-          # d'attendre une durée fixe — toujours trop courte au premier build, toujours
-          # trop longue ensuite — on interroge l'état réel du Space et on s'arrête dès
-          # qu'il tourne. Un build en échec est détecté tout de suite au lieu de faire
-          # patienter le pipeline jusqu'au bout.
           for i in $(seq 1 60); do
             reponse=$(curl -s "https://huggingface.co/api/spaces/${HF_SPACE}")
             etat=$(printf '%s' "$reponse" | python -c 'import sys, json; print(json.load(sys.stdin).get("runtime", {}).get("stage", "INJOIGNABLE"))' 2>/dev/null || echo "INJOIGNABLE")
@@ -278,12 +202,6 @@ jobs:
             fi
             sleep 15
           done
-          # L'URL publique est lue dans la réponse de l'API plutôt que reconstruite
-          # à partir du nom : c'est Hugging Face qui fait autorité sur son domaine.
-          # Le repli couvre le cas où l'API ne le renseignerait pas encore.
-          domaine=$(printf '%s' "$reponse" | python -c 'import sys, json; d = json.load(sys.stdin).get("runtime", {}).get("domains") or [{}]; print(d[0].get("domain", ""))' 2>/dev/null || echo "")
-          if [ -z "$domaine" ]; then
-            domaine="$(echo "$HF_SPACE" | tr '/' '-' | tr '[:upper:]' '[:lower:]').hf.space"
-          fi
+          domaine="$(echo "$HF_SPACE" | tr '/' '-' | tr '[:upper:]' '[:lower:]').hf.space"
           echo "Test de fumée sur https://${domaine}"
           python scripts/smoke_test.py "https://${domaine}"

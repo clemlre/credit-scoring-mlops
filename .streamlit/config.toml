@@ -1,0 +1,10 @@
+# Le tableau de bord lit des données clients : il n'écoute que sur la machine locale.
+[server]
+address = "127.0.0.1"
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "viewer"
