@@ -67,8 +67,8 @@ def charger_contexte():
 
     def route():
         requete = PredictionRequest.model_validate_json(brut)
-        _validate(modele, requete.features)
-        prediction = modele.predict([requete.features])[0]
+        couverture = _validate(modele, requete.features)
+        prediction = modele.predict([requete.features], [couverture])[0]
         return _to_response(prediction, modele).model_dump_json()
 
     return modele, brut, features, route, _validate, PredictionRequest
@@ -162,7 +162,9 @@ def afficher(resultats: dict) -> None:
 
 
 def main() -> int:
-    parseur = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    parseur = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawTextHelpFormatter
+    )
     parseur.add_argument("mode", choices=["etapes", "profil", "http"])
     parseur.add_argument("url", nargs="?", default="http://127.0.0.1:8000")
     parseur.add_argument("--repetitions", type=int, default=1000)
@@ -192,7 +194,9 @@ def main() -> int:
             **contexte_de_mesure(),
             "resultats": resultats,
         }
-        args.sortie.write_text(json.dumps(document, indent=2, ensure_ascii=False), encoding="utf-8")
+        args.sortie.write_text(
+            json.dumps(document, indent=2, ensure_ascii=False), encoding="utf-8", newline="\n"
+        )
         print(f"\n-> {args.sortie}")
     return 0
 

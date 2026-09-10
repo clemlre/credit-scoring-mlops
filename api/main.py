@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.background import BackgroundTask
 
 from api import config
-from api.model import ModelLoadError, Prediction, ScoringModel
+from api.model import Coverage, ModelLoadError, Prediction, ScoringModel
 from api.schemas import (
     EXEMPLES_PREDICT,
     BatchPredictionRequest,
@@ -179,7 +179,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     )
 
 
-def _validate(model: ScoringModel, features: dict) -> None:
+def _validate(model: ScoringModel, features: dict) -> Coverage:
     unknown = model.unknown_features(features)
     if unknown:
         shown = ", ".join(unknown[:MAX_REPORTED_UNKNOWN])
@@ -221,6 +221,7 @@ def _validate(model: ScoringModel, features: dict) -> None:
                 "d'historique de crédit, eux, peuvent rester absents."
             ),
         )
+    return coverage
 
 
 def _journaliser_sans_echec(journal, records) -> None:
@@ -371,9 +372,9 @@ def predict(
     background: BackgroundTasks,
 ) -> PredictionResponse:
     """Renvoie la probabilité de défaut et la décision d'octroi au seuil métier."""
-    _validate(model, payload.features)
+    coverage = _validate(model, payload.features)
     debut = time.perf_counter()
-    prediction = model.predict([payload.features])[0]
+    prediction = model.predict([payload.features], [coverage])[0]
     latence_ms = (time.perf_counter() - debut) * 1000
 
     _journaliser(
@@ -408,10 +409,10 @@ def predict_batch(
             ),
         )
 
-    rows = []
+    rows, coverages = [], []
     for position, item in enumerate(payload.items):
         try:
-            _validate(model, item.features)
+            coverages.append(_validate(model, item.features))
         except HTTPException as exc:
             raise HTTPException(
                 status_code=exc.status_code, detail=f"Demande n°{position} : {exc.detail}"
@@ -419,7 +420,7 @@ def predict_batch(
         rows.append(item.features)
 
     debut = time.perf_counter()
-    predictions = model.predict(rows)
+    predictions = model.predict(rows, coverages)
     latence_ms = (time.perf_counter() - debut) * 1000
 
     _journaliser(request, background, "/predict/batch", rows, predictions, model, latence_ms)

@@ -1,9 +1,4 @@
-"""Tests de la logique de scoring, sans HTTP.
-
-Ce fichier vérifie le cœur : contrat de features, garde-fous, traitement des
-valeurs manquantes et décision au seuil métier. Aucun serveur n'est lancé — si un
-de ces tests casse, le problème est dans le modèle, pas dans l'API.
-"""
+"""Tests de la logique de scoring, sans HTTP."""
 
 from __future__ import annotations
 
@@ -12,6 +7,7 @@ import json
 import numpy as np
 import pytest
 
+from api import config
 from api.model import ModelLoadError, ScoringModel
 
 # Probabilité de référence pour le dossier synthétique complet. Figée volontairement :
@@ -47,8 +43,6 @@ class TestChargement:
     def test_un_fichier_de_features_desaccorde_empeche_le_demarrage(self, tmp_path, model):
         """Le pire scénario : des colonnes décalées produiraient des scores faux mais
         plausibles. Le service doit refuser de démarrer plutôt que de servir ça."""
-        from api import config
-
         (tmp_path / "credit_default_lgbm.txt").write_text(
             config.MODEL_FILE.read_text(encoding="utf-8"), encoding="utf-8"
         )
@@ -120,6 +114,14 @@ class TestPlagesDeValidite:
     def test_un_dossier_valide_ne_declenche_aucune_alerte(self, model, valid_features):
         assert model.out_of_range_features(valid_features) == []
 
+    def test_les_alertes_sont_triees_par_nom(self, model, valid_features):
+        payload = {**valid_features, "FLAG_OWN_CAR": 3.0, "AMT_CREDIT": -1.0, "DAYS_BIRTH": 5.0}
+        noms = [p.split("=")[0] for p in model.out_of_range_features(payload)]
+        assert noms == ["AMT_CREDIT", "DAYS_BIRTH", "FLAG_OWN_CAR"]
+
+    def test_une_feature_inconnue_ou_nulle_n_est_pas_controlee(self, model):
+        assert model.out_of_range_features({"AMT_INCONNUE": -1.0, "AMT_CREDIT": None}) == []
+
 
 class TestInference:
     def test_les_features_absentes_deviennent_des_nan(self, model):
@@ -155,8 +157,11 @@ class TestInference:
             probabilities.append(model.predict([payload])[0].probability)
         assert probabilities == sorted(probabilities)
 
-    def test_un_lot_vide_ne_provoque_pas_dappel_au_modele(self, model):
-        assert model.predict([]) == []
+    def test_la_couverture_fournie_est_reutilisee(self, model, valid_features):
+        couverture = model.coverage(valid_features)
+        prediction = model.predict([valid_features], [couverture])[0]
+        assert prediction.coverage is couverture
+        assert prediction.probability == pytest.approx(REFERENCE_PROBABILITY, rel=1e-9)
 
     def test_le_lot_donne_le_meme_resultat_que_les_appels_unitaires(self, model, valid_features):
         autre = {**valid_features, "EXT_SOURCE_2": 0.2}
@@ -170,8 +175,6 @@ class TestFideliteAuModeleSource:
         """Ignoré si les données de la Partie 1 ne sont pas montées."""
         import lightgbm as lgb
 
-        from api import config
-
         booster = lgb.Booster(model_str=config.MODEL_FILE.read_text(encoding="utf-8"))
         matrix = model._to_matrix(real_clients)
         attendu = booster.predict(matrix)
@@ -179,9 +182,8 @@ class TestFideliteAuModeleSource:
         assert np.max(np.abs(np.array(obtenu) - attendu)) == 0.0
 
     def test_aucun_client_reel_nest_rejete_par_les_garde_fous(self, model, real_clients):
-        from api import config
-
         for index, dossier in enumerate(real_clients):
             assert model.out_of_range_features(dossier) == [], f"client {index}"
             couverture = model.coverage(dossier)
-            assert couverture.application_ratio >= config.MIN_APPLICATION_COVERAGE, f"client {index}"
+            minimum = config.MIN_APPLICATION_COVERAGE
+            assert couverture.application_ratio >= minimum, f"client {index}"
