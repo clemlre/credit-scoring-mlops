@@ -62,7 +62,8 @@ la décision, sans toucher au reste du dossier.
 │   ├── benchmark.py      #   latence par étape, profil cProfile, latence HTTP
 │   ├── comparer_images.py #  deux conteneurs côte à côte, mesures alternées
 │   ├── tester_charge.py  #   test de charge avec oha
-│   └── evaluer_onnx.py   #   ONNX Runtime face à LightGBM : fidélité et vitesse
+│   ├── evaluer_onnx.py   #   ONNX Runtime face à LightGBM : fidélité et vitesse
+│   └── evaluer_modele.py #   métriques out-of-fold (LightGBM et ONNX), chemin de l'API
 ├── notebooks/            # analyses Partie 1, puis notebook de data drift (étape 3)
 ├── tests/                # tests automatisés pytest
 ├── models/               # artefact déployable + paramètres de référence
@@ -286,20 +287,24 @@ python scripts/simuler_trafic.py      # alimente le journal en trafic réaliste
 uv run --group monitoring streamlit run monitoring/dashboard.py   # tableau de bord
 ```
 
-Le tableau de bord (<http://127.0.0.1:8501>) montre, sur la période choisie : le volume
-d'appels et le taux d'erreur, la latence de `/predict`, la distribution des scores et le
-taux de refus, et la dérive des 20 features les plus importantes du modèle. Il affiche une
-alerte dès qu'une erreur 500 apparaît, que plus de 5 % des appels sont refusés, que la
-latence p95 dépasse 100 ms ou qu'une feature dérive au-delà d'un PSI de 0,25. Captures et
-détail : [`docs/monitoring.md`](docs/monitoring.md#tableau-de-bord).
+Le tableau de bord (<http://127.0.0.1:8501>) se lit dans l'ordre de trois questions, sur
+la période choisie : **le modèle décide-t-il comme avant ?** (taux de refus contre le taux
+attendu hors échantillon, distribution des scores), **les données ont-elles changé ?**
+(PSI des 20 features les plus importantes du modèle) et **le service tient-il ?** (appels,
+taux d'erreur, latence de `/predict`). Un bandeau répond aux trois d'un coup ; chaque
+indicateur affiche son repère (attendu, objectif, seuil d'alerte) et chaque onglet définit
+ses termes. Un onglet rappelle le modèle en service et ses métriques out-of-fold (AUC,
+rappel, précision, F1). Captures et détail :
+[`docs/monitoring.md`](docs/monitoring.md#tableau-de-bord).
 
-![Tableau de bord — trafic décalé : les trois scores externes en dérive](docs/screenshots/dashboard-5-derive-trafic-decale.png)
+![Tableau de bord — trafic décalé : les trois questions et le modèle en service](docs/screenshots/dashboard-1-synthese-et-modele.png)
 
 **Trois choses à savoir pour lire ce monitoring :**
 
 1. **`decision` se lit avec `threshold`.** Le seuil vaut 0,10, pas 0,5 : un taux de
-   refus de 15 % est normal, pas alarmant. C'est le coût métier (`10 × FN + 1 × FP`)
-   qui l'impose.
+   refus autour de 24 % est normal, pas alarmant (23,7 % mesuré hors échantillon sur les
+   clients de la Partie 1, exposé par `GET /model/info`). C'est le coût métier
+   (`10 × FN + 1 × FP`) qui l'impose.
 2. **Un taux de refus qui monte n'accuse pas forcément le modèle.** Les colonnes
    `application_ratio` et `history_ratio` disent sur quelle quantité d'information
    chaque score a été calculé : des dossiers plus incomplets produisent mécaniquement

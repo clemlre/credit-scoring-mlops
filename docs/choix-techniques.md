@@ -155,6 +155,14 @@ Streamlit est l'une des deux ressources du projet, s'écrit en Python avec les m
 bibliothèques que le reste, et partage ses calculs avec les tests
 (`monitoring/indicateurs.py` est testé sans Streamlit).
 
+**Comment il est organisé** : autour de trois questions lues dans l'ordre (les décisions,
+l'effet visible ; les données, la cause possible ; le service, la santé technique), un
+bandeau qui y répond d'un coup, un onglet par question et un onglet sur le modèle en
+service. Chaque indicateur affiche son repère (taux de refus attendu hors échantillon,
+objectif de latence, seuil d'alerte) et chaque onglet définit ses termes : un lecteur qui
+ne connaît ni le PSI ni le p95 doit pouvoir conclure seul. Détail dans
+[`monitoring.md`](monitoring.md#tableau-de-bord).
+
 Le profil de référence ne contient que des déciles et des proportions pour les 20 features
 suivies : aucune ligne client ne quitte le poste. Il est reconstruit par
 `monitoring/construire_reference.py` si le modèle change.
@@ -169,9 +177,11 @@ service, et un calcul de dérive planifié dont le résultat serait stocké.
 
 ONNX Runtime a été évalué à l'étape 4 : deux fois plus rapide sur l'appel au modèle, mais
 l'inférence ne pèse qu'environ 3 % d'une requête, et le convertisseur (entrées float32
-seulement) ne reproduit les probabilités qu'à 7 × 10⁻³ près sur 100 000 dossiers réels.
-Le modèle servi reste celui validé à la Partie 1, au bit près. Détails et chiffres :
-[`optimisation.md`](optimisation.md).
+seulement) ne reproduit les probabilités qu'à 8 × 10⁻³ près. Sur les métriques out-of-fold
+(AUC, rappel, F1, coût métier), ONNX est neutre : une seule décision change sur 307 507
+clients. Le choix ne tient donc pas à la qualité des prédictions mais au principe : le
+modèle servi reste celui validé à la Partie 1, au bit près, et une dépendance de moins.
+Détails et chiffres : [`optimisation.md`](optimisation.md).
 
 **Ce qui rendrait ce choix mauvais** : un modèle nettement plus lourd, où l'inférence
 redeviendrait le poste principal du temps de réponse.

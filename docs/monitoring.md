@@ -263,16 +263,28 @@ uv run --group monitoring streamlit run monitoring/dashboard.py
 Elle n'écoute que sur `127.0.0.1` (`.streamlit/config.toml`) : elle affiche des données
 clients et n'a pas à être joignable depuis le réseau.
 
-**Ce qu'elle montre**, sur une fenêtre choisie (dernière heure, 24 h, 7 jours…) :
+**Comment elle se lit.** Trois questions, dans l'ordre : *le modèle décide-t-il comme
+avant ?* (l'effet visible par le métier), *les données ont-elles changé ?* (la cause
+possible), *le service tient-il ?* (la santé technique). Un bandeau y répond d'un coup,
+avec une icône et une phrase, jamais une couleur seule ; un onglet détaille chacune, et un
+onglet « Le modèle en service » rappelle ce qu'on surveille et avec quels repères. Chaque
+onglet s'ouvre sur la phrase qui dit ce qu'il répond et se ferme sur ses définitions (PSI,
+p95, couverture, 4xx/5xx, out-of-fold…) ; chaque indicateur porte son repère : attendu,
+objectif ou seuil d'alerte.
 
-| Zone | Contenu | Source |
-|---|---|---|
-| Alertes | erreurs 5xx, taux de 4xx > 5 %, latence p95 > 100 ms, dérive significative | calculées par `monitoring/indicateurs.py` |
-| Cartes | appels, taux d'erreur, latence p95 de `/predict`, prédictions, taux de refus, nombre de features en dérive | `requests`, `predictions` |
-| Activité et erreurs | appels par minute (ou heure) colorés par classe de statut, détail des erreurs par route | `requests` |
-| Scores et décisions | distribution des probabilités avec le seuil de 0,10, taux de refus dans le temps | `predictions` |
-| Latence | p50 et p95 de `POST /predict` dans le temps, médiane de l'inférence seule | `requests`, `predictions` |
-| Dérive des données | PSI des 20 features suivies, taux de manquants référence contre production | `predictions.features` |
+| Onglet | Ce qu'il répond | Indicateurs (et leur repère) | Source |
+|---|---|---|---|
+| Le modèle en service | ce qu'on surveille | version et seuil ; AUC, rappel, précision, F1, accuracy et taux de refus **out-of-fold** au seuil 0,10, et pour mémoire au seuil 0,50 | `models/model_metadata.json` |
+| 1. Décisions | l'effet | dossiers scorés ; taux de refus (repère : taux OOF attendu ± 20 %) ; couverture des dossiers ; distribution des scores avec le seuil ; taux de refus dans le temps | `predictions` |
+| 2. Données | la cause | features en dérive significative (repère : 0) et modérée ; dossiers analysés (minimum 500) ; PSI des 20 features suivies ; détail par feature avec les manquants | `predictions.features` |
+| 3. Service | la santé | appels et erreurs internes ; taux d'erreur (seuil 5 %) ; latence p95 de `/predict` (objectif 100 ms) et inférence seule ; appels par statut ; p50 et p95 dans le temps ; erreurs par route | `requests`, `predictions` |
+
+Les trois états du bandeau sont des fonctions pures de `monitoring/indicateurs.py`
+(`etat_decisions`, `etat_donnees`, `etat_service`), testées dans
+`tests/test_indicateurs.py` avec leurs seuils. Les couleurs des graphiques ont été
+vérifiées pour les daltonismes et le contraste : le bleu porte toute série neutre, l'ambre
+et le rouge ne disent que « attention » et « incident », et une légende ou un texte
+accompagne toujours la couleur.
 
 **La référence de dérive** est `monitoring/profil_reference.json` : les déciles des 20
 features au plus fort gain, calculés sur les mêmes 20 000 dossiers d'entraînement que le
@@ -296,17 +308,20 @@ Scénario rejoué le 10 septembre contre l'API optimisée (2 workers), dans une 
 nominal, puis 4 minutes de trafic dont les scores externes sont décalés de 0,2 ; 2 % des
 dossiers sont volontairement invalides tout du long.
 
+Les captures 1 à 3 et 5 portent sur la seule phase décalée (`?du=2026-09-10T15:59Z&au=2026-09-10T16:04Z`),
+la capture 4 sur tout le scénario.
+
 | Fichier | Ce qu'il montre |
 |---|---|
-| `dashboard-1-activite.png` | 2 633 appels par minute, 2,5 % de 422 (les dossiers invalides), aucune 500 |
-| `dashboard-2-scores.png` | la distribution des scores et le taux de refus, qui passe d'environ 20 % à 47 % au début du trafic décalé |
-| `dashboard-3-latence.png` | `POST /predict` stable autour de 4 ms en p50 et 7 à 8 ms en p95, inférence seule 0,8 ms |
-| `dashboard-4-derive.png` | sur tout le scénario : seule `PAYMENT_RATE` dérive franchement (déjà relevé dans le notebook), les scores externes restent sous 0,25 car le trafic décalé n'en est qu'un cinquième |
-| `dashboard-5-derive-trafic-decale.png` | sur la seule phase décalée : les trois `EXT_SOURCE` en dérive significative (PSI 3,0, 2,3 et 1,4), taux de refus 45,6 % |
+| `dashboard-1-synthese-et-modele.png` | le bandeau des trois questions (taux de refus 44,1 % contre 23,7 % attendu ; dérive significative sur les trois `EXT_SOURCE` et `PAYMENT_RATE` ; service sain, 941 appels, 2,3 % d'erreurs, p95 7 ms) et l'onglet du modèle en service avec ses métriques out-of-fold |
+| `dashboard-2-decisions.png` | l'onglet 1 : taux de refus contre son repère, distribution des scores avec le seuil, taux de refus qui monte au-dessus de la ligne « attendu » |
+| `dashboard-3-donnees-trafic-decale.png` | l'onglet 2 sur la phase décalée : quatre features en dérive significative, les seize autres stables, et le détail par feature |
+| `dashboard-4-donnees-scenario-complet.png` | l'onglet 2 sur tout le scénario : seule `PAYMENT_RATE` dérive franchement (déjà relevé dans le notebook), les scores externes restent sous 0,25 car le trafic décalé n'est qu'une partie de la période |
+| `dashboard-5-service.png` | l'onglet 3 : appels par statut (2,3 % de 422, les dossiers invalides, aucune 500), latence p50 et p95 de `POST /predict` sous 10 ms |
 
-La capture 5 recoupe la fenêtre B du notebook (PSI 3,04, 2,17 et 1,69, refus 45,0 %)
-avec un autre calcul de PSI et d'autres dossiers : les deux instruments disent la même
-chose.
+La capture 3 recoupe la fenêtre B du notebook (PSI 3,04, 2,17 et 1,69 sur les
+`EXT_SOURCE`, refus 45,0 %) avec un autre calcul de PSI et d'autres dossiers : les deux
+instruments disent la même chose.
 
 ## Console graphique et captures d'écran
 
