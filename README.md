@@ -6,7 +6,8 @@ latence, optimisation).
 
 > Projet OpenClassrooms **P8 — Confirmez vos compétences en MLOps (2/2)**.
 > Le modèle servi ici provient du projet précédent (*Initiez-vous au MLOps*, 1/2) :
-> voir [`docs/modele-partie1.md`](docs/modele-partie1.md).
+> voir [`docs/modele-partie1.md`](docs/modele-partie1.md). Les données, des 7 tables
+> sources aux tables de production : [`docs/donnees.md`](docs/donnees.md).
 
 ## En deux lignes
 

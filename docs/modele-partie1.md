@@ -21,6 +21,8 @@ Cible binaire `TARGET` : 1 = le client a fait défaut. Classes très déséquili
 
 ⚠️ Point structurant pour l'API : **le modèle ne consomme pas les données brutes d'un
 client**, mais un vecteur de 779 features agrégées sur son historique multi-tables.
+Le schéma des 7 tables, les règles d'agrégation et leurs justifications sont dans
+[`donnees.md`](donnees.md).
 
 Ce contrat a été tranché à l'étape 2 : l'API accepte un sous-ensemble libre de ces
 779 features, réparties en **245 features « dossier de demande »** (renseignées par le
