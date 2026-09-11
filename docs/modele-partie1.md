@@ -71,6 +71,31 @@ aucune valeur métier.
 
 Performance discriminante : **AUC OOF = 0,789**.
 
+### Métriques out-of-fold du modèle servi
+
+Rejouées dans ce dépôt avec le protocole de la Partie 1 (`scripts/evaluer_modele.py` :
+3 plis stratifiés, graine 42, 307 507 clients étiquetés). Résultats dans
+`docs/perf/metriques-modele.json` et dans `models/model_metadata.json`, donc exposés par
+`GET /model/info`.
+
+| | Seuil 0,10 (métier) | Seuil 0,50 (naïf) |
+|---|---:|---:|
+| AUC (indépendante du seuil) | 0,7888 | 0,7888 |
+| Accuracy | 78,3 % | 92,0 % |
+| Précision (vrais défauts / dossiers refusés) | 21,2 % | 56,9 % |
+| Rappel (défauts détectés / défauts réels) | 62,3 % | 5,2 % |
+| F1 | 0,317 | 0,096 |
+| Coût métier | 150 981 | 236 227 |
+| Taux de refus | 23,7 % | 0,7 % |
+| VP / FP / FN / VN | 15 476 / 57 491 / 9 349 / 225 191 | 1 301 / 987 / 23 524 / 281 695 |
+
+Lecture : avec 8 % de défauts, accepter tout le monde donne déjà 92 % d'accuracy. Le seuil
+0,50 « gagne » sur l'accuracy en n'attrapant que 5 % des défauts ; le seuil 0,10 en attrape
+62 % et refuse 24 % des dossiers. Les métriques qui comptent ici sont le rappel des défauts
+et le coût métier ; l'accuracy n'en est pas une. Le même script montre que la conversion
+ONNX et les optimisations de l'étape 4 ne déplacent aucune de ces métriques (voir
+[`optimisation.md`](optimisation.md)).
+
 ## Traçabilité MLflow (Partie 1)
 
 | | |

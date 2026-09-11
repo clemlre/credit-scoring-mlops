@@ -204,6 +204,46 @@ sont arrondis, et une valeur très proche d'un seuil peut basculer dans l'autre 
 profonds), au point que l'inférence redevienne une part significative de la requête. Il
 faudrait alors faire valider l'écart de score par le métier avant la mise en production.
 
+## Effet des optimisations sur les métriques du modèle
+
+Une optimisation de latence ne vaut rien si elle change les décisions. Les métriques
+ci-dessous sont **out-of-fold** : `scripts/evaluer_modele.py` rejoue le protocole de la
+Partie 1 (3 plis stratifiés, graine 42, 867 arbres) sur les 307 507 clients étiquetés,
+convertit chaque modèle de pli en ONNX et évalue les deux moteurs sur les mêmes dossiers
+(`docs/perf/metriques-modele.json`). Le rejeu retrouve les chiffres publiés par la
+Partie 1 : AUC 0,7888 (0,7889 annoncé), coût métier 150 981 (150 877 annoncé, écart de
+0,07 % dû au parallélisme de LightGBM à l'entraînement).
+
+| Seuil 0,10, 307 507 clients | LightGBM | ONNX Runtime | Écart |
+|---|---:|---:|---:|
+| AUC | 0,7888 | 0,7888 | +8 × 10⁻⁷ |
+| Accuracy | 78,26 % | 78,26 % | 0 |
+| Précision | 21,21 % | 21,21 % | 0 |
+| Rappel | 62,34 % | 62,34 % | 0 |
+| F1 | 0,3165 | 0,3165 | 0 |
+| Coût métier (10 × FN + FP) | 150 981 | 150 982 | +1 |
+| Décisions différentes | | | 1 |
+
+Les probabilités ONNX s'écartent de 7,7 × 10⁻³ au pire (689 dossiers au-delà de 10⁻⁴),
+mais **une seule décision change sur 307 507** : un client accepté par LightGBM est refusé
+par ONNX. Sur les métriques, ONNX est neutre à 10⁻⁶ près. La raison de ne pas le déployer
+reste celle du paragraphe précédent : un gain de latence que personne ne perçoit, contre
+des scores qui ne sont plus ceux du modèle validé.
+
+**Les optimisations guidées par cProfile** (bornes pré-calculées, couverture calculée une
+fois, middleware ASGI, un thread OpenMP) ne touchent pas au modèle : le profileur observe
+sans rien modifier, et les corrections portent sur le code autour de l'appel `predict`.
+La preuve : 20 000 dossiers réels passés par `ScoringModel.predict`, le chemin de l'API,
+donnent des probabilités **identiques au bit près** à celles du booster brut (bloc
+`chemin_api` de `metriques-modele.json` : écart maximal 0,0, aucune décision changée).
+Les métriques ci-dessus sont donc celles de l'API en production, avant comme après
+l'étape 4 ; l'étape 4 a divisé le temps de requête par deux sans déplacer une seule
+décision.
+
+Au seuil naïf de 0,50, pour mémoire : accuracy 92,03 % mais rappel 5,24 %, le modèle
+laisserait passer 95 % des défauts. C'est ce que le seuil métier corrige, au prix d'une
+accuracy plus basse (voir [`modele-partie1.md`](modele-partie1.md)).
+
 ## Quantification
 
 La quantification d'ONNX Runtime (int8 dynamique ou statique) réduit la précision des poids
@@ -274,6 +314,11 @@ uv run python scripts/tester_charge.py bench-avant bench-final --connexions 8 32
 # ONNX (fidélité : nécessite les données de la Partie 1)
 uv sync --group perf
 uv run --group perf python scripts/evaluer_onnx.py --lignes 100000 --sortie docs/perf/onnx.json
+
+# Métriques out-of-fold de LightGBM et d'ONNX, chemin de l'API (données de la Partie 1,
+# environ 5 minutes) ; --mettre-a-jour-metadata les publie dans GET /model/info
+P6_PROJECT_ROOT=... uv run --group training --group perf python scripts/evaluer_modele.py \
+  --sortie docs/perf/metriques-modele.json --mettre-a-jour-metadata
 ```
 
 Un fichier `.prof` s'ouvre avec `python -m pstats route.prof`, ou avec snakeviz.

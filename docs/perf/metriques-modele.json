@@ -1,0 +1,160 @@
+{
+  "date": "2026-09-11T14:33:29+00:00",
+  "commit": "c93e240",
+  "plateforme": "Windows-10-10.0.26200-SP0",
+  "python": "3.11.1",
+  "protocole": {
+    "plis": 3,
+    "graine": 42,
+    "clients": 307507,
+    "taux_de_defaut": 0.08072986956394489,
+    "echantillon": false,
+    "hyperparametres": {
+      "learning_rate": 0.030806013665461505,
+      "num_leaves": 96,
+      "max_depth": 8,
+      "min_child_weight": 45.31577806919941,
+      "min_child_samples": 94,
+      "subsample": 0.7490569607715728,
+      "colsample_bytree": 0.7876911950002604,
+      "reg_alpha": 1.093736011567689,
+      "reg_lambda": 0.010429232923631,
+      "min_split_gain": 0.06746120803844996,
+      "n_estimators": 867
+    }
+  },
+  "metriques_oof": {
+    "seuil_metier": {
+      "lightgbm": {
+        "seuil": 0.1,
+        "auc": 0.7887979273882659,
+        "accuracy": 0.7826390943945991,
+        "precision": 0.21209587895898147,
+        "rappel": 0.6234038267875126,
+        "f1": 0.3165085078534032,
+        "cout_metier": 150981,
+        "taux_refus": 0.23728565528589593,
+        "vrais_positifs": 15476,
+        "faux_positifs": 57491,
+        "faux_negatifs": 9349,
+        "vrais_negatifs": 225191
+      },
+      "onnx": {
+        "seuil": 0.1,
+        "auc": 0.7887987322952961,
+        "accuracy": 0.7826358424361072,
+        "precision": 0.2120929722618134,
+        "rappel": 0.6234038267875126,
+        "f1": 0.31650527133843936,
+        "cout_metier": 150982,
+        "taux_refus": 0.23728890724438792,
+        "vrais_positifs": 15476,
+        "faux_positifs": 57492,
+        "faux_negatifs": 9349,
+        "vrais_negatifs": 225190
+      },
+      "ecart_onnx": {
+        "auc": 8.049070301385797e-07,
+        "accuracy": -3.2519584919343814e-06,
+        "precision": -2.906697168070238e-06,
+        "rappel": 0.0,
+        "f1": -3.2365149638113877e-06,
+        "cout_metier": 1,
+        "taux_refus": 3.2519584919898925e-06,
+        "vrais_positifs": 0,
+        "faux_positifs": 1,
+        "faux_negatifs": 0,
+        "vrais_negatifs": -1
+      }
+    },
+    "seuil_naif": {
+      "lightgbm": {
+        "seuil": 0.5,
+        "auc": 0.7887979273882659,
+        "accuracy": 0.9202912454025437,
+        "precision": 0.5686188811188811,
+        "rappel": 0.05240684793554884,
+        "f1": 0.09596872349057647,
+        "cout_metier": 236227,
+        "taux_refus": 0.007440481029700137,
+        "vrais_positifs": 1301,
+        "faux_positifs": 987,
+        "faux_negatifs": 23524,
+        "vrais_negatifs": 281695
+      },
+      "onnx": {
+        "seuil": 0.5,
+        "auc": 0.7887987322952961,
+        "accuracy": 0.9202912454025437,
+        "precision": 0.5686188811188811,
+        "rappel": 0.05240684793554884,
+        "f1": 0.09596872349057647,
+        "cout_metier": 236227,
+        "taux_refus": 0.007440481029700137,
+        "vrais_positifs": 1301,
+        "faux_positifs": 987,
+        "faux_negatifs": 23524,
+        "vrais_negatifs": 281695
+      },
+      "ecart_onnx": {
+        "auc": 8.049070301385797e-07,
+        "accuracy": 0.0,
+        "precision": 0.0,
+        "rappel": 0.0,
+        "f1": 0.0,
+        "cout_metier": 0,
+        "taux_refus": 0.0,
+        "vrais_positifs": 0,
+        "faux_positifs": 0,
+        "faux_negatifs": 0,
+        "vrais_negatifs": 0
+      }
+    }
+  },
+  "fidelite_onnx": {
+    "dossiers": 307507,
+    "ecart_max": 0.007722840126231312,
+    "ecart_moyen": 2.432065689486086e-06,
+    "ecart_p99": 3.5091235584761023e-07,
+    "dossiers_ecart_sup_1e-4": 689,
+    "decisions_divergentes": 1
+  },
+  "reproductibilite_partie_1": {
+    "controle_effectue": true,
+    "avertissements": []
+  },
+  "chemin_api": {
+    "dossiers": 20000,
+    "ecart_max": 0.0,
+    "ecart_moyen": 0.0,
+    "ecart_p99": 0.0,
+    "dossiers_ecart_sup_1e-4": 0,
+    "decisions_divergentes": 0
+  },
+  "plis": [
+    {
+      "pli": 1,
+      "clients_valides": 102503,
+      "auc_lightgbm": 0.7888364392749502,
+      "auc_onnx": 0.7888372081242296,
+      "entrainement_s": 104.0,
+      "conversion_onnx_s": 2.9
+    },
+    {
+      "pli": 2,
+      "clients_valides": 102502,
+      "auc_lightgbm": 0.7897552548504307,
+      "auc_onnx": 0.7897536517281643,
+      "entrainement_s": 106.2,
+      "conversion_onnx_s": 2.6
+    },
+    {
+      "pli": 3,
+      "clients_valides": 102502,
+      "auc_lightgbm": 0.7878104213014935,
+      "auc_onnx": 0.7878132767828747,
+      "entrainement_s": 98.8,
+      "conversion_onnx_s": 2.4
+    }
+  ]
+}
