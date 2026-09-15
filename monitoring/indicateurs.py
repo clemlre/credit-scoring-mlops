@@ -196,7 +196,7 @@ def etat_service(requetes: dict) -> tuple[str, str]:
     if problemes:
         return niveau, " ; ".join(problemes).capitalize() + "."
     taux_erreur = (requetes["erreurs_4xx"] + requetes["erreurs_5xx"]) / appels
-    latence = "—" if p95 is None else f"{p95:.0f} ms"
+    latence = "N/A" if p95 is None else f"{p95:.0f} ms"
     return "ok", (
         f"{entier(appels)} appels, {pourcentage(taux_erreur)} d'erreurs, latence p95 "
         f"{latence} (objectif {SEUIL_LATENCE_P95_MS:.0f} ms)."

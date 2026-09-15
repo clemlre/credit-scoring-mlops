@@ -17,9 +17,9 @@ décrivent le **passé** de ce client, chez Home Credit ou chez d'autres prêteu
 |---|---|---|---:|---:|---|
 | `application_train` | une demande, avec `TARGET` | `SK_ID_CURR` | 307 511 | 122 | le dossier : revenus, montants, âge, emploi, logement, famille, documents, 3 scores externes |
 | `application_test` | une demande, sans `TARGET` | `SK_ID_CURR` | 48 744 | 121 | même dossier, jeu de soumission Kaggle ; sert ici de trafic simulé |
-| `bureau` | un crédit déclaré au bureau de crédit | `SK_ID_BUREAU` → `SK_ID_CURR` | 1 716 428 | 17 | crédits chez d'autres prêteurs : montants, statut, retards |
+| `bureau` | un crédit déclaré au bureau de crédit | `SK_ID_BUREAU` vers `SK_ID_CURR` | 1 716 428 | 17 | crédits chez d'autres prêteurs : montants, statut, retards |
 | `bureau_balance` | un mois d'un crédit bureau | `SK_ID_BUREAU` | 27 299 925 | 3 | statut mensuel (à jour, en retard de 1 à 5 tranches, clos) |
-| `previous_application` | une demande précédente chez Home Credit | `SK_ID_PREV` → `SK_ID_CURR` | 1 670 214 | 37 | demandes passées : approuvée, refusée, annulée, montants, conditions |
+| `previous_application` | une demande précédente chez Home Credit | `SK_ID_PREV` vers `SK_ID_CURR` | 1 670 214 | 37 | demandes passées : approuvée, refusée, annulée, montants, conditions |
 | `POS_CASH_balance` | un mois d'un crédit de consommation ou de trésorerie | `SK_ID_PREV`, `SK_ID_CURR` | 10 001 358 | 8 | échéances restantes, jours de retard mois par mois |
 | `installments_payments` | une échéance et son paiement réel | `SK_ID_PREV`, `SK_ID_CURR` | 13 605 401 | 8 | ce qui était dû, ce qui a été payé, et quand |
 | `credit_card_balance` | un mois d'une carte de crédit | `SK_ID_PREV`, `SK_ID_CURR` | 3 840 312 | 23 | solde, tirages, retards sur les cartes |
@@ -36,15 +36,15 @@ erDiagram
 
 Trois choses à savoir sur ce schéma :
 
-- **Tout est relatif à la date de la demande.** Les colonnes `DAYS_*` comptent en jours
+- Tout est relatif à la date de la demande. Les colonnes `DAYS_*` comptent en jours
   *avant* la demande, donc sont négatives ou nulles (`DAYS_BIRTH = −12 000` : 33 ans) ;
   les `MONTHS_BALANCE` comptent en mois avant. C'est pour cela que l'API accepte des jours
   négatifs et refuserait un âge positif : une règle « âge > 0 » rejetterait tout le monde.
-- **La cible** `TARGET` vaut 1 quand le client a eu des difficultés de paiement (retard de
+- La cible `TARGET` vaut 1 quand le client a eu des difficultés de paiement (retard de
   plus de X jours sur au moins une des Y premières échéances) : **8,07 %** des 307 507
   clients étiquetés. C'est ce déséquilibre qui rend l'accuracy inutilisable comme métrique
   (voir [`modele-partie1.md`](modele-partie1.md)).
-- **Tous les clients n'ont pas d'historique.** Sur le jeu d'entraînement, 85,7 % ont au
+- Tous les clients n'ont pas d'historique. Sur le jeu d'entraînement, 85,7 % ont au
   moins un crédit au bureau, 94,6 % une demande précédente chez Home Credit, 28,3 % une
   carte de crédit. Pour les autres, les agrégats correspondants n'existent pas : ils sont
   **manquants, pas nuls**, et le modèle a appris avec ces manques.
@@ -58,7 +58,7 @@ Partie 1) ramène tout au grain **un client = une ligne**, par agrégation sur
 
 | Famille (préfixe) | Features | Source | Comment elles sont construites |
 |---|---:|---|---|
-| dossier de demande (sans préfixe) | **245** | `application` | 104 colonnes numériques brutes, 3 binaires codées 0/1 (genre, voiture, logement), 133 indicatrices *one-hot* de 13 catégorielles (type de contrat, profession, organisation, logement…), 5 ratios métier |
+| dossier de demande (sans préfixe) | **245** | `application` | 104 colonnes numériques brutes, 3 binaires codées 0/1 (genre, voiture, logement), 133 indicatrices *one-hot* de 13 catégorielles (type de contrat, profession, organisation, logement...), 5 ratios métier |
 | `BURO_`, `ACTIVE_`, `CLOSED_` | 62 + 27 + 27 | `bureau` (+ `bureau_balance`) | min / max / moyenne / variance / somme des montants et des dates ; part de chaque statut ; recalculés sur les seuls crédits **actifs** puis **clos** |
 | `PREV_`, `APPROVED_`, `REFUSED_` | 189 + 30 + 30 | `previous_application` | mêmes agrégats ; recalculés sur les demandes **approuvées** puis **refusées** |
 | `POS_` | 18 | `POS_CASH_balance` | retards max et moyens, nombre de mois suivis |

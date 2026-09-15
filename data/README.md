@@ -1,4 +1,4 @@
-# `data/` — données brutes Home Credit (non versionnées)
+# `data/` : données brutes Home Credit (non versionnées)
 
 Ce dossier est **volontairement vide dans Git** (`data/*` est ignoré) : les CSV bruts
 pèsent ~2,6 Go et sont soumis aux conditions d'utilisation Kaggle. Un dépôt public

@@ -8,21 +8,21 @@ comment relire ces données. C'est la matière première de l'analyse de dérive
 
 Deux tables, reliées par `request_id`.
 
-### `predictions` — une ligne par dossier scoré
+### `predictions` : une ligne par dossier scoré
 
 | Champ | Pourquoi il est là |
 |---|---|
 | `request_id` | Renvoyé au client dans l'en-tête `X-Request-ID`. C'est la clé qui relie une réclamation à la ligne exacte en base. |
 | `occurred_at` | Horodatage UTC. Toute analyse de dérive est une comparaison de fenêtres temporelles. |
-| `endpoint` | `/predict` ou `/predict/batch` — les usages n'ont ni le même profil ni la même criticité. |
+| `endpoint` | `/predict` ou `/predict/batch` : les usages n'ont ni le même profil ni la même criticité. |
 | `model_version` | Sans elle, impossible de distinguer une dérive des données d'un changement de modèle. |
 | `threshold` | Le seuil **appliqué ce jour-là**. S'il est un jour réajusté, l'historique reste interprétable. |
 | `probability`, `decision` | Le résultat lui-même. |
-| `features_provided`, `features_missing`, `application_ratio`, `history_ratio` | La **couverture** du dossier. Un taux de refus qui monte peut venir du modèle… ou d'appelants qui envoient des dossiers plus incomplets. Sans cette colonne, les deux causes sont indiscernables. |
+| `features_provided`, `features_missing`, `application_ratio`, `history_ratio` | La **couverture** du dossier. Un taux de refus qui monte peut venir du modèle... ou d'appelants qui envoient des dossiers plus incomplets. Sans cette colonne, les deux causes sont indiscernables. |
 | `latency_ms` | Temps d'**inférence** seul (construction de la matrice + modèle), hors validation et HTTP. Pour un lot, durée de l'appel divisée par le nombre de dossiers. |
 | `features` | Le payload **tel que reçu**, en `JSONB`. C'est ce qui rend la dérive mesurable. |
 
-### `requests` — une ligne par appel HTTP, erreurs comprises
+### `requests` : une ligne par appel HTTP, erreurs comprises
 
 | Champ | Pourquoi il est là |
 |---|---|
@@ -57,7 +57,7 @@ Séparer les deux tables évite de mélanger deux grains : un appel `/predict/ba
 
 - La sortie standard est le transport de journaux natif d'un conteneur : Docker,
   Kubernetes et Hugging Face Spaces la collectent sans rien configurer. Elle reste
-  disponible même si la base est tombée — donc **aucune prédiction n'est jamais
+  disponible même si la base est tombée : donc **aucune prédiction n'est jamais
   totalement perdue**.
 - Mais elle n'est pas interrogeable. Calculer « la distribution de `EXT_SOURCE_2`
   sur les 7 derniers jours » sur des fichiers de journaux est un travail d'ETL.
@@ -76,7 +76,7 @@ Trois autres raisons, techniques :
 
 1. **`JSONB` résout le problème du schéma.** Le modèle a 779 features. Une table à
    779 colonnes serait ingérable et, surtout, **cassée le jour où le modèle change
-   de contrat** — or comparer deux versions de modèle est exactement ce que le
+   de contrat** : or comparer deux versions de modèle est exactement ce que le
    monitoring doit permettre. Le `JSONB` absorbe le changement.
 2. **Les features restent interrogeables**, contrairement à un blob : voir les
    requêtes ci-dessous.
@@ -137,7 +137,7 @@ Renvoyer 503 parce que la base de monitoring est indisponible ferait retirer l'A
 du trafic par le répartiteur de charge : une panne d'observabilité deviendrait une
 panne de service. C'est l'inverse de ce qu'on veut.
 
-Les trois états possibles : `disabled` (aucune base configurée — normal en test et
+Les trois états possibles : `disabled` (aucune base configurée : normal en test et
 en démonstration), `ready`, `unavailable`.
 
 ## Lancer la pile localement
@@ -187,7 +187,7 @@ GROUP BY decision;
  rejected |    75 |    0.2009 |           0.30
 ```
 
-**Taux de refus par tranche d'un score externe** — l'intérêt du `JSONB` : la feature
+**Taux de refus par tranche d'un score externe** : l'intérêt du `JSONB` : la feature
 est agrégée directement, sans table dédiée.
 
 ```sql
@@ -230,7 +230,7 @@ GROUP BY path ORDER BY path;
 Un taux d'erreur à 500 est un incident ; un taux de 422 qui monte signale plutôt un
 appelant qui a changé son format d'envoi.
 
-**Part de l'inférence dans le temps de requête** — la jointure sur `request_id` :
+**Part de l'inférence dans le temps de requête** : la jointure sur `request_id` :
 
 ```sql
 SELECT r.path,
@@ -269,7 +269,7 @@ possible), *le service tient-il ?* (la santé technique). Un bandeau y répond d
 avec une icône et une phrase, jamais une couleur seule ; un onglet détaille chacune, et un
 onglet « Le modèle en service » rappelle ce qu'on surveille et avec quels repères. Chaque
 onglet s'ouvre sur la phrase qui dit ce qu'il répond et se ferme sur ses définitions (PSI,
-p95, couverture, 4xx/5xx, out-of-fold…) ; chaque indicateur porte son repère : attendu,
+p95, couverture, 4xx/5xx, out-of-fold...) ; chaque indicateur porte son repère : attendu,
 objectif ou seuil d'alerte.
 
 | Onglet | Ce qu'il répond | Indicateurs (et leur repère) | Source |
@@ -296,7 +296,7 @@ d'Evidently dans le notebook, sans être identiques (le découpage des classes d
 Les seuils d'alerte sont des constantes de `monitoring/indicateurs.py`, testées dans
 `tests/test_indicateurs.py`.
 
-**Analyser une période précise** : ajouter `?du=…&au=…` à l'URL, en ISO 8601 (UTC par
+**Analyser une période précise** : ajouter `?du=...&au=...` à l'URL, en ISO 8601 (UTC par
 défaut), par exemple `http://127.0.0.1:8501/?du=2026-09-10T15:59Z&au=2026-09-10T16:04Z`.
 C'est ce qui sert à relire un incident passé, ou à envoyer à quelqu'un le lien exact de
 la fenêtre à regarder.
@@ -342,10 +342,10 @@ solution de stockage ».
 
 | Fichier | Ce qu'il montre |
 |---|---|
-| `stockage-1-arborescence.png` | l'arborescence `monitoring → Schemas → public → Tables → predictions`, dépliée jusqu'aux colonnes et contraintes |
+| `stockage-1-arborescence.png` | l'arborescence `monitoring vers Schemas vers public vers Tables vers predictions`, dépliée jusqu'aux colonnes et contraintes |
 | `stockage-2-structure-table.png` | les 14 colonnes de la table et leurs types, `features` compris |
 | `stockage-3-lignes-reelles.png` | des prédictions réellement journalisées, avec deux valeurs extraites du `jsonb` (`EXT_SOURCE_2`, `AMT_CREDIT`) et `jsonb_typeof` |
-| `stockage-4-agregation-suivi.png` | volume, taux de refus, latence et couverture agrégés par minute — on y retrouve les deux fenêtres analysées dans le notebook : 3 000 prédictions à 20,70 % de refus, puis 1 000 à 45,00 % |
+| `stockage-4-agregation-suivi.png` | volume, taux de refus, latence et couverture agrégés par minute : on y retrouve les deux fenêtres analysées dans le notebook : 3 000 prédictions à 20,70 % de refus, puis 1 000 à 45,00 % |
 | `stockage-5-infrastructure.png` | les trois conteneurs, le volume `pgdata` et son point de montage, le volume de lignes et la taille de la table |
 
 La capture 4 est la plus utile en soutenance : elle montre la même dérive du taux de
@@ -359,13 +359,13 @@ que de prendre la table entière. En production, les environnements seraient sé
 
 ## Ce qui n'est pas couvert (et pourquoi c'est assumé)
 
-- **Aucune purge automatique.** La rétention devra être décidée avec le métier
+- Aucune purge automatique. La rétention devra être décidée avec le métier
   (obligation de conservation d'une décision de crédit) puis appliquée par une
   tâche planifiée ou un partitionnement.
-- **Une tâche d'arrière-plan par requête**, sans file bornée. Suffisant ici ; sous
+- Une tâche d'arrière-plan par requête, sans file bornée. Suffisant ici ; sous
   forte charge, il faudrait une file interne à consommateur unique, ou un envoi
   vers un collecteur externe.
-- **Le `request_id` est généré par l'API.** Dans un système distribué, on
+- Le `request_id` est généré par l'API. Dans un système distribué, on
   reprendrait plutôt un identifiant de corrélation transmis par l'appelant
   (`traceparent`).
 

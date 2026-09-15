@@ -1,10 +1,10 @@
-# Credit Scoring — mise en production (MLOps)
+# Credit Scoring : mise en production (MLOps)
 
 Mise en production du modèle de scoring de crédit de **« Prêt à Dépenser »** : API de
 prédiction, conteneurisation, CI/CD, et suivi du modèle en production (data drift,
 latence, optimisation).
 
-> Projet OpenClassrooms **P8 — Confirmez vos compétences en MLOps (2/2)**.
+> Projet OpenClassrooms **P8 : Confirmez vos compétences en MLOps (2/2)**.
 > Le modèle servi ici provient du projet précédent (*Initiez-vous au MLOps*, 1/2) :
 > voir [`docs/modele-partie1.md`](docs/modele-partie1.md). Les données, des 7 tables
 > sources aux tables de production : [`docs/donnees.md`](docs/donnees.md).
@@ -18,7 +18,7 @@ de 779 features agrégées sur son historique. La décision d'octroi se prend au
 
 ## L'API en service
 
-**<https://clemlre-credit-scoring-api.hf.space>** — la racine renvoie vers la
+**<https://clemlre-credit-scoring-api.hf.space>** : la racine renvoie vers la
 documentation interactive Swagger. Le service est déployé par le pipeline à chaque
 poussée sur `main` ; les détails sont plus bas.
 
@@ -27,8 +27,8 @@ le menu déroulant *Examples* :
 
 | Exemple | Probabilité de défaut | Décision au seuil 0,10 |
 |---|---|---|
-| `refuse` — profil à risque | ≈ 0,245 | `rejected` |
-| `accepte` — profil solide | ≈ 0,006 | `accepted` |
+| `refuse` : profil à risque | ≈ 0,245 | `rejected` |
+| `accepte` : profil solide | ≈ 0,006 | `accepted` |
 
 Les deux dossiers portent les mêmes 245 features et ne diffèrent que par vingt d'entre
 elles. L'écart tient pour l'essentiel aux trois scores externes `EXT_SOURCE_*`, qui
@@ -39,24 +39,24 @@ la décision, sans toucher au reste du dossier.
 
 | Étape | Contenu | Statut |
 |---|---|---|
-| 1 | Contrôle de version, structure du projet, documentation initiale | ✅ en place |
-| 2 | API de prédiction, tests, Dockerfile, pipeline CI/CD | ✅ en place |
-| 3 | Stockage des données de production + analyse du data drift | ✅ en place |
-| 4 | Profiling et optimisation des performances | ✅ en place — [`docs/optimisation.md`](docs/optimisation.md) |
+| 1 | Contrôle de version, structure du projet, documentation initiale | En place |
+| 2 | API de prédiction, tests, Dockerfile, pipeline CI/CD | En place |
+| 3 | Stockage des données de production + analyse du data drift | En place |
+| 4 | Profiling et optimisation des performances | En place : [`docs/optimisation.md`](docs/optimisation.md) |
 
 ## Structure du dépôt
 
 ```
 .
-├── api/                  # code de l'API de prédiction — SEUL code déployé
+├── api/                  # code de l'API de prédiction : SEUL code déployé
 │   ├── config.py         #   réglages lus depuis l'environnement
 │   ├── model.py          #   chargement du modèle et inférence
-│   ├── schemas.py        #   contrat d'entrée/sortie (Pydantic → Swagger)
+│   ├── schemas.py        #   contrat d'entrée/sortie (Pydantic vers Swagger)
 │   ├── storage.py        #   journal de production (stdout JSON + PostgreSQL)
 │   ├── tracking.py       #   middleware : identifiant, durée et journal de chaque requête
 │   └── main.py           #   routes et gestion des erreurs
 ├── src/                  # pipeline de features + entraînement (hérité de la Partie 1)
-│   └── export_model.py   #   pont MLflow → artefact déployable
+│   └── export_model.py   #   pont MLflow vers artefact déployable
 ├── scripts/
 │   ├── smoke_test.py     #   vérifie un service qui tourne (conteneur, déploiement)
 │   ├── simuler_trafic.py #   alimente le journal de production en trafic réaliste
@@ -70,7 +70,7 @@ la décision, sans toucher au reste du dossier.
 ├── models/               # artefact déployable + paramètres de référence
 ├── monitoring/           # tableau de bord Streamlit, calculs de dérive, profil de référence
 ├── docs/                 # documentation, captures d'écran, mesures de performance (perf/)
-├── data/                 # CSV Home Credit — NON versionnés, voir data/README.md
+├── data/                 # CSV Home Credit : NON versionnés, voir data/README.md
 ├── .github/workflows/    # pipeline CI/CD
 ├── Dockerfile            # image de l'API (multi-étapes, utilisateur non-root)
 ├── docker-compose.yml    # pile locale : API + PostgreSQL (+ pgAdmin en option)
@@ -86,7 +86,7 @@ git clone https://github.com/clemlre/credit-scoring-mlops.git
 cd credit-scoring-mlops
 
 uv sync                          # coeur d'inférence + outils de dev (uv inclut le groupe `dev` par défaut)
-uv sync --no-dev                 # coeur d'inférence seul — ce que contiendra l'image Docker
+uv sync --no-dev                 # coeur d'inférence seul : ce que contiendra l'image Docker
 uv sync --group training         # + MLflow, Optuna, SHAP, Jupyter (reproduire la Partie 1)
 uv sync --group monitoring       # + Evidently, Streamlit (notebook de drift, tableau de bord)
 uv sync --group perf             # + ONNX Runtime (évaluation de l'étape 4)
@@ -99,7 +99,7 @@ optionnels.
 
 ### Reproduire le dataset de features
 
-Les données brutes ne sont pas versionnées (~2,6 Go, licence Kaggle) — voir
+Les données brutes ne sont pas versionnées (~2,6 Go, licence Kaggle) : voir
 [`data/README.md`](data/README.md). Une fois les CSV en place :
 
 ```bash
@@ -175,7 +175,7 @@ curl -X POST http://127.0.0.1:8000/predict \
 ```
 
 **Comment lire la réponse.** `probability` est la probabilité de **défaut**. Elle est
-comparée au seuil **0,10** — et non 0,5 — parce que le coût métier pénalise un mauvais
+comparée au seuil **0,10** : et non 0,5 : parce que le coût métier pénalise un mauvais
 client accepté dix fois plus qu'un bon client refusé. `coverage` dit sur quelle
 quantité d'information la décision a été prise : une probabilité calculée sur un
 dossier à moitié vide ne se lit pas comme une probabilité calculée sur un dossier
@@ -186,7 +186,7 @@ complet.
 | Situation | Réponse | Raison |
 |---|---|---|
 | Nom de feature inconnu | `422` | Une faute de frappe absorbée en silence donnerait un score calculé sans la variable qu'on croyait fournir. |
-| Valeur hors plage | `422` | Bornes mesurées sur les 307 507 clients d'entraînement — une valeur en dehors ne peut pas venir d'un dossier réel. |
+| Valeur hors plage | `422` | Bornes mesurées sur les 307 507 clients d'entraînement : une valeur en dehors ne peut pas venir d'un dossier réel. |
 | Dossier trop incomplet | `422` | Sous 50 % des features de demande renseignées, le score n'a plus de valeur métier. L'historique de crédit, lui, reste facultatif. |
 | Type incorrect, `Infinity`, `NaN` | `422` | Une chaîne `"0,5"` ou une valeur non finie fausseraient le calcul sans erreur visible. |
 | Modèle non chargé | `503` | Le service le dit explicitement au lieu de redémarrer en boucle. |
@@ -223,11 +223,11 @@ façon déterministe. Deux familles de tests ne tournent que si leur ressource e
 `.github/workflows/ci.yml`, déclenché sur push `main`, sur pull request vers `main`,
 et manuellement.
 
-1. **Lint et tests** — `ruff`, puis `pytest` avec plancher de couverture.
-2. **Image Docker** — construction, démarrage du conteneur, et test de fumée contre
+1. **Lint et tests** : `ruff`, puis `pytest` avec plancher de couverture.
+2. **Image Docker** : construction, démarrage du conteneur, et test de fumée contre
    le service réel. L'image n'est publiée sur GHCR que si ce test passe, et jamais
    depuis une pull request.
-3. **Déploiement** — uniquement depuis `main`. Exige le secret `HF_TOKEN` et la
+3. **Déploiement** : uniquement depuis `main`. Exige le secret `HF_TOKEN` et la
    variable `HF_SPACE` : s'ils manquent, le job échoue au lieu de passer au vert sans
    rien déployer. Il revérifie ensuite le service déployé.
 
@@ -241,7 +241,7 @@ La procédure de configuration du déploiement est décrite dans
 
 Le pipeline déploie sur Hugging Face Spaces à chaque poussée sur `main` :
 
-**<https://clemlre-credit-scoring-api.hf.space>** — documentation interactive sur
+**<https://clemlre-credit-scoring-api.hf.space>** : documentation interactive sur
 [`/docs`](https://clemlre-credit-scoring-api.hf.space/docs).
 
 Le déploiement n'est considéré comme réussi que si le Space passe à l'état `RUNNING`
@@ -268,16 +268,16 @@ uv run python scripts/benchmark.py profil         # profil cProfile de la route
 ## Pourquoi ces choix techniques
 
 FastAPI plutôt que Gradio, format texte natif plutôt que pickle, bornes de validation
-mesurées plutôt que décrétées : chaque décision est justifiée — avec ce qui a été écarté
-et à quelle condition elle deviendrait mauvaise — dans
+mesurées plutôt que décrétées : chaque décision est justifiée : avec ce qui a été écarté
+et à quelle condition elle deviendrait mauvaise : dans
 [`docs/choix-techniques.md`](docs/choix-techniques.md).
 
 ## Interpréter le monitoring
 
 L'API journalise **chaque prédiction rendue et chaque appel** (statut, durée) sur deux
 canaux : une ligne JSON sur la sortie standard (toujours, sans valeur de feature) et une
-ligne en base PostgreSQL (avec les features, en `JSONB`). La documentation complète — schéma, requêtes types,
-volumétrie mesurée, comportement en cas de panne — est dans
+ligne en base PostgreSQL (avec les features, en `JSONB`). La documentation complète : schéma, requêtes types,
+volumétrie mesurée, comportement en cas de panne : est dans
 [`docs/monitoring.md`](docs/monitoring.md).
 
 **Démarrer la pile complète :**
@@ -298,7 +298,7 @@ ses termes. Un onglet rappelle le modèle en service et ses métriques out-of-fo
 rappel, précision, F1). Captures et détail :
 [`docs/monitoring.md`](docs/monitoring.md#tableau-de-bord).
 
-![Tableau de bord — trafic décalé : les trois questions et le modèle en service](docs/screenshots/dashboard-1-synthese-et-modele.png)
+![Tableau de bord : trafic décalé : les trois questions et le modèle en service](docs/screenshots/dashboard-1-synthese-et-modele.png)
 
 **Trois choses à savoir pour lire ce monitoring :**
 
@@ -314,7 +314,7 @@ rappel, précision, F1). Captures et détail :
    en base la décision exacte contestée par un conseiller, avec les features qui l'ont
    produite.
 
-L'état du journal est exposé par `GET /health`, dans `prediction_log` — sans jamais
+L'état du journal est exposé par `GET /health`, dans `prediction_log` : sans jamais
 influencer le code de statut : une base de monitoring en panne ne doit pas faire
 retirer l'API du trafic.
 
@@ -339,11 +339,11 @@ suivi par minute, et état de l'infrastructure.
 | `feat/<sujet>` | développement d'une fonctionnalité, fusionnée dans `main` par pull request |
 | `fix/<sujet>` | correction de bug |
 
-**Messages de commit** — convention [Conventional Commits](https://www.conventionalcommits.org/fr/) :
+**Messages de commit** : convention [Conventional Commits](https://www.conventionalcommits.org/fr/) :
 `type(portée): description à l'infinitif`, avec `feat`, `fix`, `docs`, `test`, `ci`,
 `chore`, `perf`.
 
-**Nommage** — anglais dans `api/` (code de service), français dans les scripts
+**Nommage** : anglais dans `api/` (code de service), français dans les scripts
 d'analyse, le tableau de bord et les noms de tests ; messages et documentation en
 français. Style vérifié par ruff (`pyproject.toml`).
 
@@ -352,5 +352,5 @@ secrets et credentials (voir `.gitignore`).
 
 ## Licence
 
-[MIT](LICENSE) — le code uniquement. Les données Home Credit restent soumises aux
+[MIT](LICENSE) : le code uniquement. Les données Home Credit restent soumises aux
 conditions d'utilisation de Kaggle.

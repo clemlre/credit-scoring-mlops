@@ -1,4 +1,4 @@
-"""API de scoring de crédit — Prêt à Dépenser.
+"""API de scoring de crédit : Prêt à Dépenser.
 
 Lancement local : uv run uvicorn api.main:app --reload
 Documentation : http://127.0.0.1:8000/docs
@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="API de scoring de crédit — Prêt à Dépenser",
+    title="API de scoring de crédit : Prêt à Dépenser",
     version="1.0.0",
     description=(
         "Estime la probabilité de défaut d'un demandeur de crédit et rend une "
@@ -84,7 +84,7 @@ app = FastAPI(
         "pénalise un mauvais client accepté dix fois plus qu'un bon client refusé "
         "(`coût = 10 × FN + 1 × FP`).\n\n"
         "Le modèle attend 779 features agrégées sur l'historique du demandeur. "
-        "Toutes ne sont pas obligatoires — voir `GET /features` pour le contrat "
+        "Toutes ne sont pas obligatoires : voir `GET /features` pour le contrat "
         "complet et `GET /model/info` pour les règles d'acceptation."
     ),
     lifespan=lifespan,
@@ -117,7 +117,7 @@ async def validation_exception_handler(
         problems.append(f"{location} : {error['msg']}")
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        content={"detail": f"Requête invalide — {_bounded_list(problems, ' ; ')}."},
+        content={"detail": f"Requête invalide : {_bounded_list(problems, ' ; ')}."},
     )
 
 

@@ -1,4 +1,4 @@
-# Fiche modèle — héritage de la Partie 1
+# Fiche modèle : héritage de la Partie 1
 
 Ce document décrit **le modèle qu'on met en production** dans ce dépôt. Il a été
 développé, versionné et évalué au projet précédent (*Initiez-vous au MLOps*, 1/2) et
@@ -6,7 +6,7 @@ constitue le point de départ, non l'objet, de ce projet-ci.
 
 ## Problème
 
-Scoring de défaut de crédit — dataset [Home Credit Default Risk](https://www.kaggle.com/competitions/home-credit-default-risk).
+Scoring de défaut de crédit : dataset [Home Credit Default Risk](https://www.kaggle.com/competitions/home-credit-default-risk).
 Cible binaire `TARGET` : 1 = le client a fait défaut. Classes très déséquilibrées
 (~8 % de positifs).
 
@@ -15,11 +15,11 @@ Cible binaire `TARGET` : 1 = le client a fait défaut. Classes très déséquili
 | | |
 |---|---|
 | Tables sources | 7 CSV (`application_train/test`, `bureau`, `bureau_balance`, `previous_application`, `POS_CASH_balance`, `installments_payments`, `credit_card_balance`) |
-| Pipeline | `src/prepare_data.py` — adapté du kernel Kaggle *jsaguiar* |
+| Pipeline | `src/prepare_data.py` : adapté du kernel Kaggle *jsaguiar* |
 | Sortie | `output/feature_dataset.parquet`, **779 features** agrégées, clé `SK_ID_CURR` |
-| Encodage | one-hot des catégorielles + ratios métier (`PAYMENT_RATE`, `INCOME_CREDIT_PERC`, …) |
+| Encodage | one-hot des catégorielles + ratios métier (`PAYMENT_RATE`, `INCOME_CREDIT_PERC`, ...) |
 
-⚠️ Point structurant pour l'API : **le modèle ne consomme pas les données brutes d'un
+Note : Point structurant pour l'API : **le modèle ne consomme pas les données brutes d'un
 client**, mais un vecteur de 779 features agrégées sur son historique multi-tables.
 Le schéma des 7 tables, les règles d'agrégation et leurs justifications sont dans
 [`donnees.md`](donnees.md).
@@ -106,7 +106,7 @@ ONNX et les optimisations de l'étape 4 ne déplacent aucune de ces métriques (
 | Expérience | `credit-default` |
 | Modèle enregistré | `credit-default-lgbm` (Model Registry), loggé via `mlflow.lightgbm.log_model` |
 
-⚠️ Ni `mlruns.db`, ni `mlartifacts/`, ni les données ne sont versionnés ici (voir
+Note : Ni `mlruns.db`, ni `mlartifacts/`, ni les données ne sont versionnés ici (voir
 `.gitignore`) : ils vivent dans le dépôt de la Partie 1. Produire un **artefact
 sérialisé déployable** à partir de ce registre est le premier chantier de l'étape 2.
 
@@ -114,8 +114,8 @@ sérialisé déployable** à partir de ce registre est le premier chantier de l'
 
 | Fichier | Rôle |
 |---|---|
-| `src/prepare_data.py` | agrégation des 7 tables → parquet de features |
+| `src/prepare_data.py` | agrégation des 7 tables vers parquet de features |
 | `src/training.py` | setup MLflow, chargement des données, `business_cost`, boucle CV |
 | `src/optimize_lgbm.py` | recherche Optuna, balayage de seuil OOF, enregistrement au registry |
 | `src/run_step2_baselines.py`, `run_step3_models.py`, `run_mlp_activations.py` | comparaisons de modèles de la Partie 1 |
-| `notebooks/01` → `06` | analyses : préparation, MLflow, expérimentations, optimisation, activations MLP, importance des features (SHAP) |
+| `notebooks/01` vers `06` | analyses : préparation, MLflow, expérimentations, optimisation, activations MLP, importance des features (SHAP) |

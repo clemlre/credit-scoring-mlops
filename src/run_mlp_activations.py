@@ -1,6 +1,6 @@
 """Comparaison des fonctions d'activation d'un MLP (scikit-learn).
 
-Le dataset est tabulaire, donc le boosting reste meilleur — ce MLP sert à
+Le dataset est tabulaire, donc le boosting reste meilleur : ce MLP sert à
 comparer les fonctions d'activation. On garde la même architecture et on ne
 change que `activation` parmi identity / logistic / tanh / relu. Régularisation :
 pénalité L2 (`alpha`) + early stopping sur une fraction de validation interne.

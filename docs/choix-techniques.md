@@ -25,7 +25,7 @@ Le besoin exprimé par Chloé est que le département « Crédit Express » trai
 demandes **en quasi temps réel** : le client de cette API est un système d'information,
 pas un humain devant un navigateur. Or l'indicateur d'évaluation « j'ai documenté les
 routes » et le point de vigilance « appréhender les erreurs correctement » supposent des
-routes, des schémas et des codes de statut — c'est-à-dire exactement ce que FastAPI
+routes, des schémas et des codes de statut : c'est-à-dire exactement ce que FastAPI
 fournit et ce que Gradio n'a pas vocation à offrir.
 
 **Ce qui rendrait ce choix mauvais** : si le livrable attendu était une démonstration
@@ -36,7 +36,7 @@ finesse des erreurs.
 **Où Streamlit et Gradio gardent leur place** : à l'étape 3, pour le tableau de bord de
 monitoring (distribution des scores, latence, dérive), qui est un usage visuel et humain.
 Les ressources du projet les présentent d'ailleurs comme un moyen de « tester votre API »
-et de « visualiser l'analyse de drift » — pas comme un substitut à l'API.
+et de « visualiser l'analyse de drift » : pas comme un substitut à l'API.
 
 ---
 
@@ -48,11 +48,11 @@ demandeur. Trois contrats étaient possibles.
 | Option | Pourquoi écartée |
 |---|---|
 | Exiger les 779 features | Payload de plusieurs centaines de champs obligatoires, inutilisable en pratique et impossible à remplir pour un primo-emprunteur. |
-| `SK_ID_CURR` + recherche dans un magasin de features | Élégant côté appelant, mais impose d'embarquer des données clients dans l'image ou d'ajouter une base — donc des données personnelles dans un livrable public. |
+| `SK_ID_CURR` + recherche dans un magasin de features | Élégant côté appelant, mais impose d'embarquer des données clients dans l'image ou d'ajouter une base : donc des données personnelles dans un livrable public. |
 | **Dictionnaire libre (retenu)** | L'appelant transmet ce dont il dispose ; les features absentes sont traitées comme manquantes, ce que LightGBM sait faire nativement. |
 
 **Ce qui rendrait ce choix mauvais** : en production réelle avec un magasin de features
-déjà en place, l'option `SK_ID_CURR` deviendrait préférable — l'API n'aurait plus à faire
+déjà en place, l'option `SK_ID_CURR` deviendrait préférable : l'API n'aurait plus à faire
 confiance à l'appelant sur le calcul des agrégats.
 
 ---
@@ -61,13 +61,13 @@ confiance à l'appelant sur le calcul des agrégats.
 
 | Critère | Texte natif | Pickle |
 |---|---|---|
-| Exécution de code au chargement | non | **oui** — un pickle d'origine inconnue est un vecteur d'exécution |
+| Exécution de code au chargement | non | **oui** : un pickle d'origine inconnue est un vecteur d'exécution |
 | Sensibilité aux versions | tolérant entre versions mineures | exige les mêmes versions de scikit-learn/LightGBM |
 | Dépendances au chargement | LightGBM seul | scikit-learn complet |
 | Lisibilité | texte, inspectable | binaire opaque |
 
 Conséquence mesurée : l'image de production n'a besoin ni de scikit-learn, ni de pandas,
-ni de pyarrow — **951 Mo → 563 Mo** (583 Mo depuis l'ajout du pilote PostgreSQL).
+ni de pyarrow : **951 Mo vers 563 Mo** (583 Mo depuis l'ajout du pilote PostgreSQL).
 
 ---
 
@@ -84,7 +84,7 @@ codées, puis vérifiées : **0 faux rejet sur 50 000 clients réels**.
 
 | Famille | Règle | Mesure ayant servi de base |
 |---|---|---|
-| `EXT_SOURCE_*` | ∈ [0, 1] | min 8,2e-08 — max 0,963 |
+| `EXT_SOURCE_*` | ∈ [0, 1] | min 8,2e-08 : max 0,963 |
 | `DAYS_*` (hors `_PERC`) | ≤ 0 | jours avant la demande |
 | `AMT_*`, `CNT_*` | ≥ 0 | min observé 0,0 |
 | `FLAG_*` | ∈ {0, 1} | aucune autre valeur |
@@ -92,7 +92,7 @@ codées, puis vérifiées : **0 faux rejet sur 50 000 clients réels**.
 Même démarche pour le plancher de complétude : il porte sur les **245 features de
 dossier** et non sur les 779, parce que les 534 agrégats d'historique manquent
 légitimement chez un primo-emprunteur. Seuil à 50 %, quand le 1er centile observé est à
-78,4 % — la marge est délibérée.
+78,4 % : la marge est délibérée.
 
 ---
 

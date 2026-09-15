@@ -41,12 +41,12 @@ def load_training_data() -> tuple[pd.DataFrame, pd.Series]:
     y = df.loc[mask, "TARGET"].astype(int).reset_index(drop=True)
     X = df.loc[mask].drop(columns=["TARGET", "SK_ID_CURR"]).reset_index(drop=True)
     del df
-    # Colonnes object résiduelles (par sécurité — Aguiar a déjà encodé)
+    # Colonnes object résiduelles (par sécurité : Aguiar a déjà encodé)
     X = X.drop(columns=X.select_dtypes(include="object").columns)
     # Downcast float64 -> float32 pour réduire l'empreinte mémoire de moitié
     f64 = X.select_dtypes(include="float64").columns
     X[f64] = X[f64].astype("float32")
-    # Les features de ratio (PAYMENT_RATE, *_PERC, var aggregations…) peuvent contenir ±inf
+    # Les features de ratio (PAYMENT_RATE, *_PERC, var aggregations) peuvent contenir ±inf
     X = X.replace([np.inf, -np.inf], np.nan)
     return X, y
 

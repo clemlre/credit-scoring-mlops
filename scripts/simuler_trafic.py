@@ -147,7 +147,7 @@ def main() -> int:
     noms = contrat["application_features"] + contrat["history_features"]
     dossiers = dossiers_reels(noms, arguments.nombre)
     if dossiers is None:
-        print("Parquet de la Partie 1 introuvable — repli sur des dossiers synthétiques.")
+        print("Parquet de la Partie 1 introuvable : repli sur des dossiers synthétiques.")
         print("  (utilisable pour une démonstration, pas pour conclure sur la dérive)")
         dossiers = dossiers_synthetiques(contrat["application_features"], arguments.nombre)
     else:
@@ -167,7 +167,7 @@ def main() -> int:
         envoyes, acceptes, erreurs = envoyer_par_lots(arguments.url, dossiers, arguments.lot)
 
     print(
-        f"\n{envoyes} prédictions journalisées — {acceptes} acceptées, "
+        f"\n{envoyes} prédictions journalisées : {acceptes} acceptées, "
         f"{envoyes - acceptes} refusées ; {erreurs} appel(s) en erreur."
     )
     return 0 if envoyes else 1

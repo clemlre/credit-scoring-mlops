@@ -149,7 +149,6 @@ jobs:
           {
             echo "---"
             echo "title: API de scoring de credit"
-            echo "emoji: 💳"
             echo "colorFrom: blue"
             echo "colorTo: indigo"
             echo "sdk: docker"
@@ -192,7 +191,7 @@ jobs:
                 break
                 ;;
               BUILD_ERROR|RUNTIME_ERROR|CONFIG_ERROR)
-                echo "::error::Le Space a échoué au stade $etat — voir les journaux du Space."
+                echo "::error::Le Space a échoué au stade $etat : voir les journaux du Space."
                 exit 1
                 ;;
             esac

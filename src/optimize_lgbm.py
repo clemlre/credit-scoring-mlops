@@ -1,4 +1,4 @@
-r"""Étape 4 — optimisation des hyperparamètres de LightGBM avec Optuna.
+r"""Étape 4 : optimisation des hyperparamètres de LightGBM avec Optuna.
 
 Objectif optimisé : le coût métier (10*FN + FP) validé en StratifiedKFold, au
 seuil choisi pour chaque fold. Median pruning pour couper les essais faibles.
@@ -125,10 +125,8 @@ def main(n_trials: int = 30) -> None:
     print(f"  meilleur coût CV : {study.best_value:.0f}", flush=True)
     print(f"  params : {best}", flush=True)
 
-    # Params finaux : on garde n_estimators raisonnable + early stopping sur un holdout.
     final_params = {**best, "n_estimators": 3000}
 
-    # Courbe d'apprentissage (train vs valid) sur un holdout 85/15.
     n = len(X)
     rng = np.random.RandomState(42)
     idx = rng.permutation(n)

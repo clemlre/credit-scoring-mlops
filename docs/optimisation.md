@@ -9,7 +9,7 @@ des fichiers de `docs/perf/`, produits par les scripts listés en fin de documen
 Image d'origine contre image optimisée, dans les conditions du Space Hugging Face
 « cpu-basic » : conteneur Linux limité à 2 CPU. Médiane de 3 tours alternés.
 
-**Sous charge** — test oha sur `/predict`, 15 s par mesure (`docs/perf/charge.json`) :
+**Sous charge** : test oha sur `/predict`, 15 s par mesure (`docs/perf/charge.json`) :
 
 | | Avant | Après | Écart |
 |---|---:|---:|---:|
@@ -19,7 +19,7 @@ Image d'origine contre image optimisée, dans les conditions du Space Hugging Fa
 | Latence p95, 32 connexions | 309,8 ms | 136,6 ms | −56 % |
 | Latence p99, 32 connexions | 362,6 ms | 164,9 ms | −55 % |
 
-**Requête seule** — 1 000 requêtes séquentielles (`docs/perf/comparaison-finale.json`) :
+**Requête seule** : 1 000 requêtes séquentielles (`docs/perf/comparaison-finale.json`) :
 
 | | Avant | Après | Écart |
 |---|---:|---:|---:|
@@ -39,16 +39,16 @@ sur 20 dossiers comparés : le modèle et son format n'ont pas changé.
 
 ## Méthode
 
-- **Conditions** : l'image de production, lancée avec `--cpus=2 --memory=4g`, sans base de
+- Conditions : l'image de production, lancée avec `--cpus=2 --memory=4g`, sans base de
   données (comme sur le Space). Dossier envoyé : l'exemple « refusé » de Swagger, 245
   features.
-- **Alternance** : les conteneurs sont mesurés tour à tour, trois fois, et on retient la
+- Alternance : les conteneurs sont mesurés tour à tour, trois fois, et on retient la
   médiane. Sur un portable, deux mesures successives du même conteneur varient facilement de
   20 % : mesurer « avant » un jour et « après » le lendemain ne prouverait rien.
-- **Charge** : oha tourne dans un conteneur qui partage l'espace réseau de la cible. Un
+- Charge : oha tourne dans un conteneur qui partage l'espace réseau de la cible. Un
   premier générateur en Python, sous Windows, donnait des débits trop instables (de 218 à
   367 req/s pour le même conteneur) pour attribuer un gain à un changement précis.
-- **Instrument** : le temps serveur est lu dans les journaux JSON du conteneur. C'est le
+- Instrument : le temps serveur est lu dans les journaux JSON du conteneur. C'est le
   dispositif de monitoring de l'étape 3 qui sert ici de mesure.
 
 Les mesures d'étapes en processus (`scripts/benchmark.py etapes`) sont faites sous Windows,
@@ -84,14 +84,14 @@ boucle d'événements d'uvicorn. On y voyait le coût de `BaseHTTPMiddleware` et
 passages par `run_in_threadpool` à chaque requête : la dépendance `get_model`, la route, la
 sérialisation de la réponse et deux tâches de journalisation.
 
-## Goulot 1 — le contrôle des plages de valeurs
+## Goulot 1 : le contrôle des plages de valeurs
 
-Chaque valeur reçue était comparée aux cinq préfixes des règles (`EXT_SOURCE_`, `DAYS_`…).
+Chaque valeur reçue était comparée aux cinq préfixes des règles (`EXT_SOURCE_`, `DAYS_`...).
 Les bornes de chaque feature sont désormais résolues une fois, au chargement du modèle ; le
 contrôle devient une recherche dans un dictionnaire. La couverture calculée pendant la
 validation est transmise à `predict` au lieu d'être recalculée.
 
-| En processus (`avant-etapes.json` → `apres-etapes.json`) | Avant | Après |
+| En processus (`avant-etapes.json` vers `apres-etapes.json`) | Avant | Après |
 |---|---:|---:|
 | Contrôle du contrat, p50 | 0,34 ms | 0,06 ms |
 | Route hors HTTP, p50 | 1,60 ms | 0,62 ms |
@@ -99,7 +99,7 @@ validation est transmise à `predict` au lieu d'être recalculée.
 Le nombre d'appels de fonctions mesuré par cProfile sur 2 000 requêtes passe de 3,66 à 1,68
 million.
 
-## Goulot 2 — la pile HTTP
+## Goulot 2 : la pile HTTP
 
 - Le middleware `@app.middleware("http")` est un `BaseHTTPMiddleware`, qui crée un groupe de
   tâches et des flux mémoire à chaque requête. Il est remplacé par un middleware ASGI pur,
@@ -112,9 +112,9 @@ million.
   moins.
 
 Effet, code seul et un worker (`docs/perf/comparaison-code.json`) : temps serveur p50
-2,51 → 2,10 ms, p99 9,5 → 5,6 ms.
+2,51 vers 2,10 ms, p99 9,5 vers 5,6 ms.
 
-## Goulot 3 — les threads OpenMP dans un conteneur
+## Goulot 3 : les threads OpenMP dans un conteneur
 
 Ce goulot ne se voyait pas dans les profils Python.
 
@@ -156,9 +156,9 @@ d'environ 75 à 180 Mo, négligeable face aux 16 Go du Space.
 
 Avec deux workers et un thread OpenMP chacun, le service utilise exactement ses 2 vCPU,
 sans sursouscription. L'effet des workers seuls n'est pas isolé proprement : la seule série
-qui le mesure (`comparaison-workers.json`, 320 → 364 req/s) a été faite avec le générateur
+qui le mesure (`comparaison-workers.json`, 320 vers 364 req/s) a été faite avec le générateur
 Python, trop instable. Le gain combiné du code et des workers se lit dans `charge.json` :
-187 → 337 req/s à 8 connexions, avant même le réglage d'OpenMP.
+187 vers 337 req/s à 8 connexions, avant même le réglage d'OpenMP.
 
 ## ONNX Runtime : testé, non retenu
 
