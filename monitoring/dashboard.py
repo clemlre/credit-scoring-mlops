@@ -16,25 +16,29 @@ DATABASE_URL désigne la base (par défaut, celle de docker-compose.yml).
 from __future__ import annotations
 
 import json
-import os
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import altair as alt
 import pandas as pd
-import psycopg
 import streamlit as st
-from psycopg import sql
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE))
 
-from monitoring import indicateurs  # noqa: E402
-
-DSN = os.environ.get("DATABASE_URL", "postgresql://scoring:scoring_dev@127.0.0.1:5432/monitoring")
+from monitoring import indicateurs, queries  # noqa: E402
 PROFIL = Path(__file__).with_name("profil_reference.json")
 METADATA = RACINE / "models" / "model_metadata.json"
+
+versions = st.cache_data(queries.versions, ttl=30, show_spinner=False)
+resume_requetes = st.cache_data(queries.request_summary, ttl=30, show_spinner=False)
+resume_predictions = st.cache_data(queries.prediction_summary, ttl=30, show_spinner=False)
+serie_requetes = st.cache_data(queries.request_series, ttl=30, show_spinner=False)
+serie_latence = st.cache_data(queries.latency_series, ttl=30, show_spinner=False)
+serie_predictions = st.cache_data(queries.prediction_series, ttl=30, show_spinner=False)
+erreurs = st.cache_data(queries.errors, ttl=30, show_spinner=False)
+valeurs_production = st.cache_data(queries.production_values, ttl=30, show_spinner=False)
 
 # Couleurs vérifiées pour les daltonismes et le contraste sur fond blanc : le bleu porte
 # toute série neutre, l'orange une seconde série, l'ambre et le rouge ne disent que
@@ -67,166 +71,16 @@ QUESTIONS = (
 )
 
 
-# --- Lecture de la base -----------------------------------------------------------
-
-
-def lire(requete, parametres=()) -> pd.DataFrame:
-    with psycopg.connect(DSN, connect_timeout=5) as connexion:
-        curseur = connexion.execute(requete, parametres)
-        colonnes = [c.name for c in curseur.description]
-        return pd.DataFrame(curseur.fetchall(), columns=colonnes)
-
-
-def premiere_ligne(requete, parametres) -> dict:
-    ligne = lire(requete, parametres).iloc[0]
-    return {k: (None if pd.isna(v) else v) for k, v in ligne.items()}
-
-
-def filtre(periode: tuple, version: str | None = None) -> tuple:
-    depuis, jusqua = periode
-    conditions, parametres = [sql.SQL("TRUE")], []
-    if depuis is not None:
-        conditions.append(sql.SQL("occurred_at >= %s"))
-        parametres.append(depuis)
-    if jusqua is not None:
-        conditions.append(sql.SQL("occurred_at < %s"))
-        parametres.append(jusqua)
-    if version is not None:
-        conditions.append(sql.SQL("model_version = %s"))
-        parametres.append(version)
-    return sql.SQL(" AND ").join(conditions), parametres
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def versions() -> list[str]:
-    resultat = lire("SELECT DISTINCT model_version FROM predictions ORDER BY 1")
-    return resultat["model_version"].tolist()
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def resume_requetes(periode: tuple) -> dict:
-    where, parametres = filtre(periode)
-    return premiere_ligne(
-        sql.SQL("""
-            SELECT count(*) AS appels,
-                   count(*) FILTER (WHERE status_code BETWEEN 400 AND 499) AS erreurs_4xx,
-                   count(*) FILTER (WHERE status_code >= 500) AS erreurs_5xx,
-                   percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms)
-                       FILTER (WHERE path = '/predict') AS latence_p50_ms,
-                   percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)
-                       FILTER (WHERE path = '/predict') AS latence_p95_ms
-            FROM requests WHERE {where}
-        """).format(where=where),
-        parametres,
-    )
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def resume_predictions(periode: tuple, version: str | None) -> dict:
-    where, parametres = filtre(periode, version)
-    return premiere_ligne(
-        sql.SQL("""
-            SELECT count(*) AS nombre,
-                   avg((decision = 'rejected')::int)::float AS taux_refus,
-                   avg(probability) AS proba_moyenne,
-                   percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms) AS inference_p50_ms,
-                   avg(application_ratio) AS couverture_dossier,
-                   avg(history_ratio) AS couverture_historique
-            FROM predictions WHERE {where}
-        """).format(where=where),
-        parametres,
-    )
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def serie_requetes(periode: tuple, pas: str) -> pd.DataFrame:
-    where, parametres = filtre(periode)
-    return lire(
-        sql.SQL("""
-            SELECT date_trunc({pas}, occurred_at) AS instant,
-                   CASE WHEN status_code >= 500 THEN '5xx'
-                        WHEN status_code >= 400 THEN '4xx'
-                        ELSE '2xx' END AS classe,
-                   count(*) AS appels
-            FROM requests WHERE {where}
-            GROUP BY 1, 2 ORDER BY 1
-        """).format(pas=sql.Literal(pas), where=where),
-        parametres,
-    )
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def serie_latence(periode: tuple, pas: str) -> pd.DataFrame:
-    where, parametres = filtre(periode)
-    return lire(
-        sql.SQL("""
-            SELECT date_trunc({pas}, occurred_at) AS instant,
-                   percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms) AS p50,
-                   percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95
-            FROM requests
-            WHERE {where} AND path = '/predict' AND status_code < 400
-            GROUP BY 1 ORDER BY 1
-        """).format(pas=sql.Literal(pas), where=where),
-        parametres,
-    )
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def serie_predictions(periode: tuple, version: str | None, pas: str) -> pd.DataFrame:
-    where, parametres = filtre(periode, version)
-    return lire(
-        sql.SQL("""
-            SELECT date_trunc({pas}, occurred_at) AS instant,
-                   count(*) AS predictions,
-                   avg((decision = 'rejected')::int)::float AS taux_refus,
-                   avg(application_ratio) AS couverture_dossier,
-                   avg(history_ratio) AS couverture_historique
-            FROM predictions WHERE {where}
-            GROUP BY 1 ORDER BY 1
-        """).format(pas=sql.Literal(pas), where=where),
-        parametres,
-    )
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def erreurs(periode: tuple) -> pd.DataFrame:
-    where, parametres = filtre(periode)
-    return lire(
-        sql.SQL("""
-            SELECT path AS route, status_code AS statut, count(*) AS appels
-            FROM requests WHERE {where} AND status_code >= 400
-            GROUP BY 1, 2 ORDER BY 3 DESC
-        """).format(where=where),
-        parametres,
-    )
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def valeurs_production(periode: tuple, version: str | None, noms: tuple[str, ...]):
-    where, parametres = filtre(periode, version)
-    colonnes = sql.SQL(", ").join(
-        sql.SQL("(features->>{})::float AS {}").format(sql.Literal(n), sql.Identifier(n))
-        for n in noms
-    )
-    requete = sql.SQL("SELECT probability, {colonnes} FROM predictions WHERE {where}").format(
-        colonnes=colonnes, where=where
-    )
-    return lire(requete, parametres).astype("float64")
-
-
-# --- Formats et briques d'affichage ------------------------------------------------
-
-
 def format_ms(valeur) -> str:
-    return "—" if valeur is None else f"{indicateurs.decimal(valeur, 1)} ms"
+    return "N/A" if valeur is None else f"{indicateurs.decimal(valeur, 1)} ms"
 
 
 def format_pct(valeur) -> str:
-    return "—" if valeur is None else indicateurs.pourcentage(valeur)
+    return "N/A" if valeur is None else indicateurs.pourcentage(valeur)
 
 
 def format_decimal(valeur, chiffres: int = 3) -> str:
-    return "—" if valeur is None else indicateurs.decimal(valeur, chiffres)
+    return "N/A" if valeur is None else indicateurs.decimal(valeur, chiffres)
 
 
 def carte(colonne, titre: str, valeur: str, aide: str, attendu: str | None = None) -> None:
@@ -266,9 +120,6 @@ def repere_horizontal(valeur: float, etiquette: str) -> alt.LayerChart:
         .encode(x=alt.value(0), y="y:Q", text="etiquette:N")
     )
     return ligne + texte
-
-
-# --- Graphiques -------------------------------------------------------------------
 
 
 def graphique_activite(serie: pd.DataFrame) -> alt.Chart:
@@ -358,9 +209,6 @@ def graphique_derive(tableau: pd.DataFrame) -> alt.LayerChart:
     seuils = pd.DataFrame({"x": [indicateurs.PSI_STABLE, indicateurs.PSI_SIGNIFICATIF]})
     lignes = alt.Chart(seuils).mark_rule(color=ENCRE, strokeDash=[6, 4]).encode(x="x:Q")
     return (barres + lignes).properties(height=520)
-
-
-# --- Sections ---------------------------------------------------------------------
 
 
 def bandeau(etats: list[tuple[str, str]]) -> None:
@@ -472,12 +320,12 @@ def onglet_donnees(derives: list[dict], profil: dict, nombre: int) -> None:
     lisible = nombre >= indicateurs.MIN_PREDICTIONS_PSI
     ligne = st.columns(3)
     carte(
-        ligne[0], "Dérive significative", str(significatives) if lisible else "—",
+        ligne[0], "Dérive significative", str(significatives) if lisible else "N/A",
         f"Features dont le PSI dépasse {indicateurs.decimal(indicateurs.PSI_SIGNIFICATIF)}.",
         attendu="attendu 0",
     )
     carte(
-        ligne[1], "Dérive modérée", str(moderees) if lisible else "—",
+        ligne[1], "Dérive modérée", str(moderees) if lisible else "N/A",
         f"Features dont le PSI est entre {indicateurs.decimal(indicateurs.PSI_STABLE)} et "
         f"{indicateurs.decimal(indicateurs.PSI_SIGNIFICATIF)} : à surveiller.",
         attendu=f"sur {len(derives)} features suivies",
@@ -586,9 +434,6 @@ def onglet_service(requetes: dict, predictions: dict, serie_req, serie_lat, peri
     )
 
 
-# --- Page -------------------------------------------------------------------------
-
-
 def choisir_periode(maintenant: datetime) -> tuple[tuple, timedelta | None]:
     """Période précise lue dans l'URL (?du=&au=), sinon fenêtre glissante."""
     if "du" not in st.query_params:
@@ -613,7 +458,7 @@ def choisir_periode(maintenant: datetime) -> tuple[tuple, timedelta | None]:
 
 
 def main() -> None:
-    st.set_page_config(page_title="Monitoring — scoring de crédit", layout="wide")
+    st.set_page_config(page_title="Monitoring : scoring de crédit", layout="wide")
     st.title("Suivi du modèle de scoring en production")
     st.caption(
         "À lire dans l'ordre : les décisions (l'effet visible), puis les données (la cause "
@@ -636,7 +481,7 @@ def main() -> None:
         choix_version = st.selectbox("Version du modèle", ["Toutes", *liste_versions])
         if st.button("Rafraîchir", width="stretch"):
             st.cache_data.clear()
-        st.caption(f"Base : {DSN.rsplit('@', 1)[-1]}")
+        st.caption(f"Base : {queries.DSN.rsplit('@', 1)[-1]}")
 
     version = None if choix_version == "Toutes" else choix_version
     pas = indicateurs.pas_temporel(duree)
@@ -679,14 +524,14 @@ def main() -> None:
 
     with st.expander("Que faire de ce tableau de bord ?"):
         st.markdown(
-            "- **Taux de refus hors bande** : vérifier d'abord la couverture des dossiers "
+            "- Taux de refus hors bande : vérifier d'abord la couverture des dossiers "
             "(onglet 1), puis la dérive (onglet 2). Des dossiers plus incomplets changent les "
             "décisions sans que le modèle soit en cause.\n"
-            "- **Dérive significative** : analyser la période dans "
-            "`notebooks/07_data_drift.ipynb` (lien `?du=…&au=…` de la barre latérale).\n"
-            "- **Erreurs** : une hausse des 422 se règle avec l'appelant ; toute 500 est un "
+            "- Dérive significative : analyser la période dans "
+            "`notebooks/07_data_drift.ipynb` (lien `?du=...&au=...` de la barre latérale).\n"
+            "- Erreurs : une hausse des 422 se règle avec l'appelant ; toute 500 est un "
             "incident à investiguer par `request_id` (en-tête `X-Request-ID`).\n"
-            "- **Réentraîner** se décide sur une baisse de performance mesurée quand les "
+            "- Réentraîner se décide sur une baisse de performance mesurée quand les "
             "défauts réels sont connus, pas sur un PSI seul."
         )
 
