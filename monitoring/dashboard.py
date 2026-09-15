@@ -22,12 +22,14 @@ from pathlib import Path
 
 import altair as alt
 import pandas as pd
+import psycopg
 import streamlit as st
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE))
 
 from monitoring import indicateurs, queries  # noqa: E402
+
 PROFIL = Path(__file__).with_name("profil_reference.json")
 METADATA = RACINE / "models" / "model_metadata.json"
 
