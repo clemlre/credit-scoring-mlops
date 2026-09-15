@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -163,22 +162,10 @@ class RequestRecord:
         )
 
 
-class _StdoutHandler(logging.StreamHandler):
-    """Résout sys.stdout à chaque émission (compatible avec la capture de pytest)."""
-
-    @property
-    def stream(self):
-        return sys.stdout
-
-    @stream.setter
-    def stream(self, _value):
-        pass
-
-
 def _stdout_channel() -> logging.Logger:
     channel = logging.getLogger("api.predictions")
     if not channel.handlers:
-        handler = _StdoutHandler()
+        handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(message)s"))
         channel.addHandler(handler)
         channel.setLevel(logging.INFO)
@@ -213,7 +200,7 @@ class PredictionLog:
         except Exception as exc:  # noqa: BLE001
             self._pool = None
             self.last_error = _describe(exc)
-            logger.error("Journal des prédictions : pool inutilisable — %s", self.last_error)
+            logger.error("Journal des prédictions : pool inutilisable : %s", self.last_error)
             return
 
         try:
@@ -222,7 +209,7 @@ class PredictionLog:
             self.last_error = _describe(exc)
             logger.warning(
                 "Journal des prédictions : base injoignable, nouvel essai à la première "
-                "écriture — %s",
+                "écriture : %s",
                 self.last_error,
             )
 
@@ -275,7 +262,7 @@ class PredictionLog:
         except Exception as exc:  # noqa: BLE001
             self.last_error = _describe(exc)
             logger.warning(
-                "Journal de production : %d ligne(s) non stockée(s) — %s",
+                "Journal de production : %d ligne(s) non stockée(s) : %s",
                 sum(len(records) for _, records in batches),
                 self.last_error,
             )
