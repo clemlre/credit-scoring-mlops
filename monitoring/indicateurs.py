@@ -24,6 +24,9 @@ MIN_PREDICTIONS_PSI = 500
 SEUIL_TAUX_4XX = 0.05
 SEUIL_LATENCE_P95_MS = 100.0
 
+# Écart relatif toléré entre le taux de refus observé et le taux attendu du modèle.
+SEUIL_ECART_TAUX_REFUS = 0.20
+
 EPSILON = 1e-4
 
 
@@ -33,6 +36,10 @@ def pourcentage(valeur: float) -> str:
 
 def decimal(valeur: float, chiffres: int = 2) -> str:
     return f"{valeur:.{chiffres}f}".replace(".", ",")
+
+
+def entier(valeur) -> str:
+    return f"{int(valeur):,}".replace(",", " ")
 
 
 def periode_precise(du: str, au: str | None, maintenant: datetime) -> tuple[datetime, datetime]:
@@ -117,33 +124,95 @@ def derive(profil: dict, production: dict[str, np.ndarray]) -> list[dict]:
     return sorted(lignes, key=lambda ligne: ligne["psi"], reverse=True)
 
 
-def alertes(requetes: dict, predictions: dict, derives: list[dict]) -> list[tuple[str, str]]:
-    """Messages (niveau, texte) à afficher en tête du tableau de bord."""
-    messages = []
-    if requetes["erreurs_5xx"]:
-        messages.append(("error", f"{requetes['erreurs_5xx']} erreur(s) interne(s) (5xx)."))
+# Les trois questions du tableau de bord, dans l'ordre de lecture. Chaque état est un
+# couple (niveau, texte) ; le niveau vaut ok, info, warning ou error.
 
-    if requetes["appels"]:
-        taux_4xx = requetes["erreurs_4xx"] / requetes["appels"]
-        if taux_4xx > SEUIL_TAUX_4XX:
-            texte = f"{pourcentage(taux_4xx)} des appels sont refusés (4xx) : "
-            texte += "un appelant envoie peut-être des dossiers mal formés."
-            messages.append(("warning", texte))
 
-    p95 = requetes["latence_p95_ms"]
-    if p95 is not None and p95 > SEUIL_LATENCE_P95_MS:
-        texte = f"Latence p95 de {p95:.0f} ms, objectif {SEUIL_LATENCE_P95_MS:.0f} ms."
-        messages.append(("warning", texte))
+def etat_decisions(predictions: dict, attendu: float | None) -> tuple[str, str]:
+    """1. Le modèle décide-t-il comme avant ? Le taux de refus contre le taux attendu."""
+    nombre, taux = predictions["nombre"], predictions["taux_refus"]
+    if not nombre:
+        return "info", "Aucune prédiction sur la période."
+    if attendu is None:
+        return "info", (
+            f"Taux de refus {pourcentage(taux)} ; aucun taux attendu dans les métadonnées "
+            "du modèle pour le comparer."
+        )
+    ecart = (taux - attendu) / attendu
+    if abs(ecart) > SEUIL_ECART_TAUX_REFUS:
+        signe = f"{ecart:+.0%}".replace("%", " %")
+        return "warning", (
+            f"Taux de refus {pourcentage(taux)} contre {pourcentage(attendu)} attendu "
+            f"({signe} d'écart relatif)."
+        )
+    tolerance = f"{SEUIL_ECART_TAUX_REFUS:.0%}".replace("%", " %")
+    return "ok", (
+        f"Taux de refus {pourcentage(taux)}, cohérent avec les {pourcentage(attendu)} "
+        f"attendus (tolérance ± {tolerance})."
+    )
 
-    if predictions["nombre"] < MIN_PREDICTIONS_PSI:
-        texte = f"{predictions['nombre']} prédictions sur la période : il en faut au moins "
-        texte += f"{MIN_PREDICTIONS_PSI} pour que le PSI soit interprétable."
-        messages.append(("info", texte))
-        return messages
 
+def etat_donnees(derives: list[dict], nombre: int) -> tuple[str, str]:
+    """2. Les données ont-elles changé ? Le PSI des features suivies."""
+    if nombre < MIN_PREDICTIONS_PSI:
+        return "info", (
+            f"{entier(nombre)} prédictions : il en faut au moins {MIN_PREDICTIONS_PSI} pour "
+            "lire le PSI. Élargir la fenêtre."
+        )
     significatives = [d["feature"] for d in derives if d["bande"] == "significative"]
     if significatives:
-        texte = f"Dérive significative (PSI ≥ {decimal(PSI_SIGNIFICATIF)}) sur "
-        texte += f"{len(significatives)} feature(s) : {', '.join(significatives)}."
-        messages.append(("warning", texte))
-    return messages
+        return "warning", (
+            f"Dérive significative (PSI ≥ {decimal(PSI_SIGNIFICATIF)}) sur "
+            f"{len(significatives)} feature(s) : {', '.join(significatives)}."
+        )
+    moderees = sum(d["bande"] == "modérée" for d in derives)
+    if moderees:
+        return "ok", (
+            f"Aucune dérive significative ; {moderees} feature(s) en dérive modérée "
+            f"sur {len(derives)} suivies."
+        )
+    return "ok", f"Aucune dérive sur les {len(derives)} features suivies."
+
+
+def etat_service(requetes: dict) -> tuple[str, str]:
+    """3. Le service tient-il ? Erreurs internes, appels refusés, latence."""
+    appels = requetes["appels"]
+    if not appels:
+        return "info", "Aucun appel sur la période."
+    problemes, niveau = [], "ok"
+    if requetes["erreurs_5xx"]:
+        problemes.append(f"{entier(requetes['erreurs_5xx'])} erreur(s) interne(s) (5xx)")
+        niveau = "error"
+    taux_4xx = requetes["erreurs_4xx"] / appels
+    if taux_4xx > SEUIL_TAUX_4XX:
+        problemes.append(
+            f"{pourcentage(taux_4xx)} d'appels refusés (4xx), seuil {pourcentage(SEUIL_TAUX_4XX)}"
+        )
+        niveau = "warning" if niveau == "ok" else niveau
+    p95 = requetes["latence_p95_ms"]
+    if p95 is not None and p95 > SEUIL_LATENCE_P95_MS:
+        problemes.append(f"latence p95 {p95:.0f} ms, objectif {SEUIL_LATENCE_P95_MS:.0f} ms")
+        niveau = "warning" if niveau == "ok" else niveau
+    if problemes:
+        return niveau, " ; ".join(problemes).capitalize() + "."
+    taux_erreur = (requetes["erreurs_4xx"] + requetes["erreurs_5xx"]) / appels
+    latence = "N/A" if p95 is None else f"{p95:.0f} ms"
+    return "ok", (
+        f"{entier(appels)} appels, {pourcentage(taux_erreur)} d'erreurs, latence p95 "
+        f"{latence} (objectif {SEUIL_LATENCE_P95_MS:.0f} ms)."
+    )
+
+
+def metriques_modele(metadata: dict) -> dict:
+    """Performances out-of-fold lues dans la carte d'identité du modèle (None si absentes)."""
+    metriques = metadata.get("metrics", {})
+    return {
+        "auc": metriques.get("auc_oof"),
+        "accuracy": metriques.get("accuracy_oof"),
+        "precision": metriques.get("precision_oof"),
+        "rappel": metriques.get("recall_oof"),
+        "f1": metriques.get("f1_oof"),
+        "taux_refus_attendu": metriques.get("rejection_rate_oof"),
+        "accuracy_seuil_naif": metriques.get("accuracy_oof_threshold_0.5"),
+        "rappel_seuil_naif": metriques.get("recall_oof_threshold_0.5"),
+    }

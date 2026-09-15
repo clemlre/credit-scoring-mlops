@@ -1,4 +1,4 @@
-"""Tests des calculs du tableau de bord (PSI, fenêtres, alertes)."""
+"""Tests des calculs du tableau de bord (PSI, fenêtres, états des trois questions)."""
 
 from __future__ import annotations
 
@@ -136,33 +136,110 @@ class TestDerive:
         assert derives["B"]["manquant_production"] is None
 
 
-class TestAlertes:
-    def test_un_service_sain_ne_declenche_rien(self):
-        derives = [{"feature": "A", "bande": "stable"}]
-        assert ind.alertes(requetes(), {"nombre": 1000}, derives) == []
+class TestEtatDuService:
+    def test_un_service_sain_est_ok(self):
+        niveau, texte = ind.etat_service(requetes())
+        assert niveau == "ok"
+        assert "100" in texte
 
-    def test_une_erreur_interne_est_signalee(self):
-        niveaux = [n for n, _ in ind.alertes(requetes(erreurs_5xx=1), {"nombre": 1000}, [])]
-        assert niveaux == ["error"]
+    def test_sans_aucun_appel_on_ne_conclut_pas(self):
+        assert ind.etat_service(requetes(appels=0))[0] == "info"
+
+    def test_une_erreur_interne_est_un_incident(self):
+        niveau, texte = ind.etat_service(requetes(erreurs_5xx=1))
+        assert niveau == "error"
+        assert "5xx" in texte
 
     def test_un_taux_de_refus_http_eleve_est_signale(self):
-        messages = ind.alertes(requetes(erreurs_4xx=10), {"nombre": 1000}, [])
-        assert messages[0][0] == "warning"
-        assert "10,0 %" in messages[0][1]
+        niveau, texte = ind.etat_service(requetes(erreurs_4xx=10))
+        assert niveau == "warning"
+        assert "10,0 %" in texte
 
     def test_une_latence_hors_objectif_est_signalee(self):
-        messages = ind.alertes(requetes(latence_p95_ms=250.0), {"nombre": 1000}, [])
-        assert "250 ms" in messages[0][1]
+        niveau, texte = ind.etat_service(requetes(latence_p95_ms=250.0))
+        assert niveau == "warning"
+        assert "250 ms" in texte
 
-    def test_une_derive_significative_est_signalee(self):
-        derives = [{"feature": "EXT_SOURCE_2", "bande": "significative"}]
-        messages = ind.alertes(requetes(), {"nombre": 1000}, derives)
-        assert "EXT_SOURCE_2" in messages[0][1]
+    def test_les_compteurs_lus_en_float_depuis_la_base_sont_affiches_en_entiers(self):
+        # psycopg + pandas rendent les count(*) en float dès qu'une colonne voisine l'est.
+        _, texte = ind.etat_service(requetes(appels=100.0, erreurs_5xx=2.0))
+        assert "2 erreur" in texte
+        assert "2.0" not in texte
 
+    def test_plusieurs_problemes_sont_tous_cites_au_niveau_le_plus_grave(self):
+        niveau, texte = ind.etat_service(requetes(erreurs_5xx=2, latence_p95_ms=250.0))
+        assert niveau == "error"
+        assert "5xx" in texte and "250 ms" in texte
+
+
+class TestEtatDesDonnees:
     def test_sous_le_volume_minimal_le_psi_n_est_pas_interprete(self):
         derives = [{"feature": "EXT_SOURCE_2", "bande": "significative"}]
-        messages = ind.alertes(requetes(), {"nombre": 100}, derives)
-        assert [n for n, _ in messages] == ["info"]
+        niveau, texte = ind.etat_donnees(derives, nombre=100)
+        assert niveau == "info"
+        assert "500" in texte
+
+    def test_une_derive_significative_nomme_les_features(self):
+        derives = [
+            {"feature": "EXT_SOURCE_2", "bande": "significative"},
+            {"feature": "PAYMENT_RATE", "bande": "significative"},
+            {"feature": "AMT_CREDIT", "bande": "stable"},
+        ]
+        niveau, texte = ind.etat_donnees(derives, nombre=1000)
+        assert niveau == "warning"
+        assert "EXT_SOURCE_2" in texte and "PAYMENT_RATE" in texte
+
+    def test_des_derives_moderees_seules_restent_ok(self):
+        derives = [{"feature": "A", "bande": "modérée"}, {"feature": "B", "bande": "stable"}]
+        niveau, texte = ind.etat_donnees(derives, nombre=1000)
+        assert niveau == "ok"
+        assert "1" in texte and "modérée" in texte
+
+    def test_sans_aucune_derive_c_est_ok(self):
+        assert ind.etat_donnees([{"feature": "A", "bande": "stable"}], nombre=1000)[0] == "ok"
+
+
+class TestEtatDesDecisions:
+    def test_un_taux_de_refus_dans_la_bande_attendue_est_ok(self):
+        niveau, texte = ind.etat_decisions({"nombre": 1000, "taux_refus": 0.22}, attendu=0.20)
+        assert niveau == "ok"
+        assert "22,0 %" in texte and "20,0 %" in texte
+        assert "± 20 %" in texte
+
+    def test_un_ecart_de_plus_de_vingt_pour_cent_est_signale_avec_son_sens(self):
+        niveau, texte = ind.etat_decisions({"nombre": 1000, "taux_refus": 0.45}, attendu=0.20)
+        assert niveau == "warning"
+        assert "+125 %" in texte
+
+    def test_sans_prediction_on_ne_conclut_pas(self):
+        assert ind.etat_decisions({"nombre": 0, "taux_refus": None}, attendu=0.20)[0] == "info"
+
+    def test_sans_taux_attendu_on_affiche_sans_juger(self):
+        niveau, texte = ind.etat_decisions({"nombre": 1000, "taux_refus": 0.22}, attendu=None)
+        assert niveau == "info"
+        assert "22,0 %" in texte
+
+
+class TestMetriquesDuModele:
+    def test_les_metriques_oof_sont_lues_dans_les_metadonnees(self):
+        metadata = {
+            "model_version": "1",
+            "decision_threshold": 0.1,
+            "metrics": {"auc_oof": 0.7889, "recall_oof": 0.7, "f1_oof": 0.3,
+                        "precision_oof": 0.19, "accuracy_oof": 0.75, "rejection_rate_oof": 0.3,
+                        "recall_oof_threshold_0.5": 0.05, "accuracy_oof_threshold_0.5": 0.92},
+        }
+        m = ind.metriques_modele(metadata)
+        assert m["auc"] == 0.7889
+        assert m["rappel"] == 0.7
+        assert m["taux_refus_attendu"] == 0.3
+        assert m["rappel_seuil_naif"] == 0.05
+        assert m["accuracy_seuil_naif"] == 0.92
+
+    def test_une_metrique_absente_vaut_none(self):
+        m = ind.metriques_modele({"metrics": {"auc_oof": 0.7889}})
+        assert m["auc"] == 0.7889
+        assert m["rappel"] is None and m["taux_refus_attendu"] is None
 
 
 def test_le_profil_versionne_est_coherent():

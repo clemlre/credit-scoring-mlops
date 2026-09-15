@@ -25,7 +25,7 @@ service déployé répond correctement.
 
 ## Deux cibles de déploiement
 
-### Registre d'images GHCR — actif sans configuration
+### Registre d'images GHCR : actif sans configuration
 
 À chaque poussée sur `main`, l'image est publiée sur
 `ghcr.io/clemlre/credit-scoring-mlops`, étiquetée `latest` et par empreinte de commit.
@@ -35,7 +35,7 @@ Aucun secret à créer : le pipeline utilise le jeton éphémère fourni par Git
 docker run -p 8000:8000 ghcr.io/clemlre/credit-scoring-mlops:latest
 ```
 
-### Hugging Face Spaces — service en ligne, à configurer une fois
+### Hugging Face Spaces : service en ligne, à configurer une fois
 
 C'est la cible recommandée par l'énoncé du projet. Sans les identifiants ci-dessous, le
 job de déploiement **échoue explicitement** (`secret HF_TOKEN absent`, `variable HF_SPACE
@@ -47,15 +47,15 @@ de lint, de tests et d'image, eux, restent verts.
 1. **Créer le Space** sur <https://huggingface.co/new-space>
    - propriétaire : votre compte ;
    - nom : `credit-scoring-api` (par exemple) ;
-   - **SDK : Docker** — surtout pas Gradio ou Streamlit, l'image est fournie par le
+   - SDK : Docker : surtout pas Gradio ou Streamlit, l'image est fournie par le
      dépôt ;
    - visibilité : publique.
 
 2. **Créer un jeton d'accès** sur
-   <https://huggingface.co/settings/tokens> — type **Write**.
+   <https://huggingface.co/settings/tokens> : type **Write**.
 
 3. **Déclarer les identifiants dans GitHub**, dans
-   *Settings → Secrets and variables → Actions* :
+   *Settings vers Secrets and variables vers Actions* :
 
    | Type | Nom | Valeur |
    |---|---|---|
@@ -66,15 +66,15 @@ de lint, de tests et d'image, eux, restent verts.
    journaux et interdit sa lecture après enregistrement. Il n'apparaît à aucun moment
    dans un fichier du dépôt.
 
-4. **Relancer le pipeline** — n'importe quelle poussée sur `main`, ou
-   *Actions → CI/CD → Run workflow*.
+4. **Relancer le pipeline** : n'importe quelle poussée sur `main`, ou
+   *Actions vers CI/CD vers Run workflow*.
 
 #### Ce que le pipeline fait alors
 
 - Il génère l'en-tête de configuration attendu par Hugging Face (`sdk: docker`,
-  `app_port: 8000`) en tête du README, **sans le committer dans le dépôt GitHub** — le
+  `app_port: 8000`) en tête du README, **sans le committer dans le dépôt GitHub** : le
   README du projet reste lisible.
-- Il pousse vers le Space un **instantané** du dépôt — un unique commit sans historique,
+- Il pousse vers le Space un **instantané** du dépôt : un unique commit sans historique,
   dont le message porte l'empreinte du commit GitHub d'origine pour la traçabilité. Le
   Space reconstruit ensuite l'image à partir du `Dockerfile`.
 - Il **interroge l'API Hugging Face** jusqu'à ce que le Space passe à l'état `RUNNING`
@@ -102,7 +102,7 @@ décision avec le seuil, et le refus d'une entrée invalide.
 | Le Space se construit puis affiche « no healthy upstream » | `app_port` ne correspond pas au port exposé | `app_port: 8000`, aligné sur le `Dockerfile` |
 | `import lightgbm` échoue au démarrage du conteneur | `libgomp1` absent des images `slim` | installé explicitement dans le `Dockerfile` |
 | Le Space ignore la configuration | en-tête YAML absent du README | généré par le pipeline avant la poussée |
-| `! [remote rejected] … shallow update not allowed` | `actions/checkout` fait un clone superficiel, impossible à pousser vers un autre serveur Git | `fetch-depth: 0` sur le job de déploiement |
+| `! [remote rejected] ... shallow update not allowed` | `actions/checkout` fait un clone superficiel, impossible à pousser vers un autre serveur Git | `fetch-depth: 0` sur le job de déploiement |
 | Le test de fumée échoue alors que le Space finit par tourner | le premier build d'une image de 583 Mo dépasse largement le délai d'attente fixe qui était utilisé | attente de l'état `RUNNING` via l'API, au lieu d'une durée en dur |
 | `Your push was rejected because it contains binary files` | Hugging Face impose son stockage Xet pour les binaires poussés en Git ordinaire ; les captures d'écran du dépôt en sont | `docs/screenshots/` est retiré de l'arbre envoyé au Space : c'est un livrable GitHub, pas un élément d'exécution |
 | Le même refus **persiste** après avoir supprimé les binaires | Hugging Face inspecte tout l'historique poussé : les blobs restent dans les commits qui les ont ajoutés | le Space reçoit un **instantané** (`git checkout --orphan`), pas l'historique du dépôt |

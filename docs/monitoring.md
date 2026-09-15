@@ -8,21 +8,21 @@ comment relire ces données. C'est la matière première de l'analyse de dérive
 
 Deux tables, reliées par `request_id`.
 
-### `predictions` — une ligne par dossier scoré
+### `predictions` : une ligne par dossier scoré
 
 | Champ | Pourquoi il est là |
 |---|---|
 | `request_id` | Renvoyé au client dans l'en-tête `X-Request-ID`. C'est la clé qui relie une réclamation à la ligne exacte en base. |
 | `occurred_at` | Horodatage UTC. Toute analyse de dérive est une comparaison de fenêtres temporelles. |
-| `endpoint` | `/predict` ou `/predict/batch` — les usages n'ont ni le même profil ni la même criticité. |
+| `endpoint` | `/predict` ou `/predict/batch` : les usages n'ont ni le même profil ni la même criticité. |
 | `model_version` | Sans elle, impossible de distinguer une dérive des données d'un changement de modèle. |
 | `threshold` | Le seuil **appliqué ce jour-là**. S'il est un jour réajusté, l'historique reste interprétable. |
 | `probability`, `decision` | Le résultat lui-même. |
-| `features_provided`, `features_missing`, `application_ratio`, `history_ratio` | La **couverture** du dossier. Un taux de refus qui monte peut venir du modèle… ou d'appelants qui envoient des dossiers plus incomplets. Sans cette colonne, les deux causes sont indiscernables. |
+| `features_provided`, `features_missing`, `application_ratio`, `history_ratio` | La **couverture** du dossier. Un taux de refus qui monte peut venir du modèle... ou d'appelants qui envoient des dossiers plus incomplets. Sans cette colonne, les deux causes sont indiscernables. |
 | `latency_ms` | Temps d'**inférence** seul (construction de la matrice + modèle), hors validation et HTTP. Pour un lot, durée de l'appel divisée par le nombre de dossiers. |
 | `features` | Le payload **tel que reçu**, en `JSONB`. C'est ce qui rend la dérive mesurable. |
 
-### `requests` — une ligne par appel HTTP, erreurs comprises
+### `requests` : une ligne par appel HTTP, erreurs comprises
 
 | Champ | Pourquoi il est là |
 |---|---|
@@ -57,7 +57,7 @@ Séparer les deux tables évite de mélanger deux grains : un appel `/predict/ba
 
 - La sortie standard est le transport de journaux natif d'un conteneur : Docker,
   Kubernetes et Hugging Face Spaces la collectent sans rien configurer. Elle reste
-  disponible même si la base est tombée — donc **aucune prédiction n'est jamais
+  disponible même si la base est tombée : donc **aucune prédiction n'est jamais
   totalement perdue**.
 - Mais elle n'est pas interrogeable. Calculer « la distribution de `EXT_SOURCE_2`
   sur les 7 derniers jours » sur des fichiers de journaux est un travail d'ETL.
@@ -76,7 +76,7 @@ Trois autres raisons, techniques :
 
 1. **`JSONB` résout le problème du schéma.** Le modèle a 779 features. Une table à
    779 colonnes serait ingérable et, surtout, **cassée le jour où le modèle change
-   de contrat** — or comparer deux versions de modèle est exactement ce que le
+   de contrat** : or comparer deux versions de modèle est exactement ce que le
    monitoring doit permettre. Le `JSONB` absorbe le changement.
 2. **Les features restent interrogeables**, contrairement à un blob : voir les
    requêtes ci-dessous.
@@ -137,7 +137,7 @@ Renvoyer 503 parce que la base de monitoring est indisponible ferait retirer l'A
 du trafic par le répartiteur de charge : une panne d'observabilité deviendrait une
 panne de service. C'est l'inverse de ce qu'on veut.
 
-Les trois états possibles : `disabled` (aucune base configurée — normal en test et
+Les trois états possibles : `disabled` (aucune base configurée : normal en test et
 en démonstration), `ready`, `unavailable`.
 
 ## Lancer la pile localement
@@ -187,7 +187,7 @@ GROUP BY decision;
  rejected |    75 |    0.2009 |           0.30
 ```
 
-**Taux de refus par tranche d'un score externe** — l'intérêt du `JSONB` : la feature
+**Taux de refus par tranche d'un score externe** : l'intérêt du `JSONB` : la feature
 est agrégée directement, sans table dédiée.
 
 ```sql
@@ -230,7 +230,7 @@ GROUP BY path ORDER BY path;
 Un taux d'erreur à 500 est un incident ; un taux de 422 qui monte signale plutôt un
 appelant qui a changé son format d'envoi.
 
-**Part de l'inférence dans le temps de requête** — la jointure sur `request_id` :
+**Part de l'inférence dans le temps de requête** : la jointure sur `request_id` :
 
 ```sql
 SELECT r.path,
@@ -263,16 +263,28 @@ uv run --group monitoring streamlit run monitoring/dashboard.py
 Elle n'écoute que sur `127.0.0.1` (`.streamlit/config.toml`) : elle affiche des données
 clients et n'a pas à être joignable depuis le réseau.
 
-**Ce qu'elle montre**, sur une fenêtre choisie (dernière heure, 24 h, 7 jours…) :
+**Comment elle se lit.** Trois questions, dans l'ordre : *le modèle décide-t-il comme
+avant ?* (l'effet visible par le métier), *les données ont-elles changé ?* (la cause
+possible), *le service tient-il ?* (la santé technique). Un bandeau y répond d'un coup,
+avec une icône et une phrase, jamais une couleur seule ; un onglet détaille chacune, et un
+onglet « Le modèle en service » rappelle ce qu'on surveille et avec quels repères. Chaque
+onglet s'ouvre sur la phrase qui dit ce qu'il répond et se ferme sur ses définitions (PSI,
+p95, couverture, 4xx/5xx, out-of-fold...) ; chaque indicateur porte son repère : attendu,
+objectif ou seuil d'alerte.
 
-| Zone | Contenu | Source |
-|---|---|---|
-| Alertes | erreurs 5xx, taux de 4xx > 5 %, latence p95 > 100 ms, dérive significative | calculées par `monitoring/indicateurs.py` |
-| Cartes | appels, taux d'erreur, latence p95 de `/predict`, prédictions, taux de refus, nombre de features en dérive | `requests`, `predictions` |
-| Activité et erreurs | appels par minute (ou heure) colorés par classe de statut, détail des erreurs par route | `requests` |
-| Scores et décisions | distribution des probabilités avec le seuil de 0,10, taux de refus dans le temps | `predictions` |
-| Latence | p50 et p95 de `POST /predict` dans le temps, médiane de l'inférence seule | `requests`, `predictions` |
-| Dérive des données | PSI des 20 features suivies, taux de manquants référence contre production | `predictions.features` |
+| Onglet | Ce qu'il répond | Indicateurs (et leur repère) | Source |
+|---|---|---|---|
+| Le modèle en service | ce qu'on surveille | version et seuil ; AUC, rappel, précision, F1, accuracy et taux de refus **out-of-fold** au seuil 0,10, et pour mémoire au seuil 0,50 | `models/model_metadata.json` |
+| 1. Décisions | l'effet | dossiers scorés ; taux de refus (repère : taux OOF attendu ± 20 %) ; couverture des dossiers ; distribution des scores avec le seuil ; taux de refus dans le temps | `predictions` |
+| 2. Données | la cause | features en dérive significative (repère : 0) et modérée ; dossiers analysés (minimum 500) ; PSI des 20 features suivies ; détail par feature avec les manquants | `predictions.features` |
+| 3. Service | la santé | appels et erreurs internes ; taux d'erreur (seuil 5 %) ; latence p95 de `/predict` (objectif 100 ms) et inférence seule ; appels par statut ; p50 et p95 dans le temps ; erreurs par route | `requests`, `predictions` |
+
+Les trois états du bandeau sont des fonctions pures de `monitoring/indicateurs.py`
+(`etat_decisions`, `etat_donnees`, `etat_service`), testées dans
+`tests/test_indicateurs.py` avec leurs seuils. Les couleurs des graphiques ont été
+vérifiées pour les daltonismes et le contraste : le bleu porte toute série neutre, l'ambre
+et le rouge ne disent que « attention » et « incident », et une légende ou un texte
+accompagne toujours la couleur.
 
 **La référence de dérive** est `monitoring/profil_reference.json` : les déciles des 20
 features au plus fort gain, calculés sur les mêmes 20 000 dossiers d'entraînement que le
@@ -284,7 +296,7 @@ d'Evidently dans le notebook, sans être identiques (le découpage des classes d
 Les seuils d'alerte sont des constantes de `monitoring/indicateurs.py`, testées dans
 `tests/test_indicateurs.py`.
 
-**Analyser une période précise** : ajouter `?du=…&au=…` à l'URL, en ISO 8601 (UTC par
+**Analyser une période précise** : ajouter `?du=...&au=...` à l'URL, en ISO 8601 (UTC par
 défaut), par exemple `http://127.0.0.1:8501/?du=2026-09-10T15:59Z&au=2026-09-10T16:04Z`.
 C'est ce qui sert à relire un incident passé, ou à envoyer à quelqu'un le lien exact de
 la fenêtre à regarder.
@@ -296,17 +308,20 @@ Scénario rejoué le 10 septembre contre l'API optimisée (2 workers), dans une 
 nominal, puis 4 minutes de trafic dont les scores externes sont décalés de 0,2 ; 2 % des
 dossiers sont volontairement invalides tout du long.
 
+Les captures 1 à 3 et 5 portent sur la seule phase décalée (`?du=2026-09-10T15:59Z&au=2026-09-10T16:04Z`),
+la capture 4 sur tout le scénario.
+
 | Fichier | Ce qu'il montre |
 |---|---|
-| `dashboard-1-activite.png` | 2 633 appels par minute, 2,5 % de 422 (les dossiers invalides), aucune 500 |
-| `dashboard-2-scores.png` | la distribution des scores et le taux de refus, qui passe d'environ 20 % à 47 % au début du trafic décalé |
-| `dashboard-3-latence.png` | `POST /predict` stable autour de 4 ms en p50 et 7 à 8 ms en p95, inférence seule 0,8 ms |
-| `dashboard-4-derive.png` | sur tout le scénario : seule `PAYMENT_RATE` dérive franchement (déjà relevé dans le notebook), les scores externes restent sous 0,25 car le trafic décalé n'en est qu'un cinquième |
-| `dashboard-5-derive-trafic-decale.png` | sur la seule phase décalée : les trois `EXT_SOURCE` en dérive significative (PSI 3,0, 2,3 et 1,4), taux de refus 45,6 % |
+| `dashboard-1-synthese-et-modele.png` | le bandeau des trois questions (taux de refus 44,1 % contre 23,7 % attendu ; dérive significative sur les trois `EXT_SOURCE` et `PAYMENT_RATE` ; service sain, 941 appels, 2,3 % d'erreurs, p95 7 ms) et l'onglet du modèle en service avec ses métriques out-of-fold |
+| `dashboard-2-decisions.png` | l'onglet 1 : taux de refus contre son repère, distribution des scores avec le seuil, taux de refus qui monte au-dessus de la ligne « attendu » |
+| `dashboard-3-donnees-trafic-decale.png` | l'onglet 2 sur la phase décalée : quatre features en dérive significative, les seize autres stables, et le détail par feature |
+| `dashboard-4-donnees-scenario-complet.png` | l'onglet 2 sur tout le scénario : seule `PAYMENT_RATE` dérive franchement (déjà relevé dans le notebook), les scores externes restent sous 0,25 car le trafic décalé n'est qu'une partie de la période |
+| `dashboard-5-service.png` | l'onglet 3 : appels par statut (2,3 % de 422, les dossiers invalides, aucune 500), latence p50 et p95 de `POST /predict` sous 10 ms |
 
-La capture 5 recoupe la fenêtre B du notebook (PSI 3,04, 2,17 et 1,69, refus 45,0 %)
-avec un autre calcul de PSI et d'autres dossiers : les deux instruments disent la même
-chose.
+La capture 3 recoupe la fenêtre B du notebook (PSI 3,04, 2,17 et 1,69 sur les
+`EXT_SOURCE`, refus 45,0 %) avec un autre calcul de PSI et d'autres dossiers : les deux
+instruments disent la même chose.
 
 ## Console graphique et captures d'écran
 
@@ -327,10 +342,10 @@ solution de stockage ».
 
 | Fichier | Ce qu'il montre |
 |---|---|
-| `stockage-1-arborescence.png` | l'arborescence `monitoring → Schemas → public → Tables → predictions`, dépliée jusqu'aux colonnes et contraintes |
+| `stockage-1-arborescence.png` | l'arborescence `monitoring vers Schemas vers public vers Tables vers predictions`, dépliée jusqu'aux colonnes et contraintes |
 | `stockage-2-structure-table.png` | les 14 colonnes de la table et leurs types, `features` compris |
 | `stockage-3-lignes-reelles.png` | des prédictions réellement journalisées, avec deux valeurs extraites du `jsonb` (`EXT_SOURCE_2`, `AMT_CREDIT`) et `jsonb_typeof` |
-| `stockage-4-agregation-suivi.png` | volume, taux de refus, latence et couverture agrégés par minute — on y retrouve les deux fenêtres analysées dans le notebook : 3 000 prédictions à 20,70 % de refus, puis 1 000 à 45,00 % |
+| `stockage-4-agregation-suivi.png` | volume, taux de refus, latence et couverture agrégés par minute : on y retrouve les deux fenêtres analysées dans le notebook : 3 000 prédictions à 20,70 % de refus, puis 1 000 à 45,00 % |
 | `stockage-5-infrastructure.png` | les trois conteneurs, le volume `pgdata` et son point de montage, le volume de lignes et la taille de la table |
 
 La capture 4 est la plus utile en soutenance : elle montre la même dérive du taux de
@@ -344,13 +359,13 @@ que de prendre la table entière. En production, les environnements seraient sé
 
 ## Ce qui n'est pas couvert (et pourquoi c'est assumé)
 
-- **Aucune purge automatique.** La rétention devra être décidée avec le métier
+- Aucune purge automatique. La rétention devra être décidée avec le métier
   (obligation de conservation d'une décision de crédit) puis appliquée par une
   tâche planifiée ou un partitionnement.
-- **Une tâche d'arrière-plan par requête**, sans file bornée. Suffisant ici ; sous
+- Une tâche d'arrière-plan par requête, sans file bornée. Suffisant ici ; sous
   forte charge, il faudrait une file interne à consommateur unique, ou un envoi
   vers un collecteur externe.
-- **Le `request_id` est généré par l'API.** Dans un système distribué, on
+- Le `request_id` est généré par l'API. Dans un système distribué, on
   reprendrait plutôt un identifiant de corrélation transmis par l'appelant
   (`traceparent`).
 

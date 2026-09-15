@@ -12,7 +12,14 @@
     "business_cost_optimal_threshold": 150877.0,
     "business_cost_threshold_0.5": 236407.0,
     "optimal_threshold": 0.1,
-    "optuna_best_cv_cost": 8565.666666666666
+    "optuna_best_cv_cost": 8565.666666666666,
+    "accuracy_oof": 0.7826390943945991,
+    "precision_oof": 0.21209587895898147,
+    "recall_oof": 0.6234038267875126,
+    "f1_oof": 0.3165085078534032,
+    "rejection_rate_oof": 0.23728565528589593,
+    "accuracy_oof_threshold_0.5": 0.9202912454025437,
+    "recall_oof_threshold_0.5": 0.05240684793554884
   },
   "hyperparameters": {
     "learning_rate": "0.030806013665461505",

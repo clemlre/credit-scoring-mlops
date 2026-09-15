@@ -226,7 +226,6 @@ class TestEcritureEnBase:
         journal.record([record])
 
         _, lignes = journal._pool.inserted[0]
-        # La dernière colonne est le JSONB des features.
         assert lignes[0][-1].obj == {"AMT_CREDIT": 406597.5, "EXT_SOURCE_2": 0.2629}
 
     def test_la_fermeture_libere_le_pool(self):
@@ -313,7 +312,7 @@ class TestIntegrationPostgres:
     def dsn(self):
         url = os.environ.get("DATABASE_URL")
         if not url:
-            pytest.skip("DATABASE_URL non défini — tests d'intégration PostgreSQL ignorés")
+            pytest.skip("DATABASE_URL non défini : tests d'intégration PostgreSQL ignorés")
         return url
 
     @pytest.fixture

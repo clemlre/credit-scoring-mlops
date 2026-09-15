@@ -24,7 +24,7 @@ ACCEPTED_EXAMPLE: dict[str, float] = _load_example("exemple_dossier_accepte.json
 
 PREDICT_EXAMPLES: dict[str, dict] = {
     "refuse": {
-        "summary": "Dossier refusé — profil à risque",
+        "summary": "Dossier refusé : profil à risque",
         "description": (
             "Scores externes bas et mensualité élevée au regard du revenu. "
             "Probabilité attendue autour de 0,24 : au-dessus du seuil de 0,10, "
@@ -33,7 +33,7 @@ PREDICT_EXAMPLES: dict[str, dict] = {
         "value": {"features": REJECTED_EXAMPLE},
     },
     "accepte": {
-        "summary": "Dossier accepté — profil solide",
+        "summary": "Dossier accepté : profil solide",
         "description": (
             "Mêmes 245 features, dont vingt modifiées : scores externes élevés, "
             "ancienneté professionnelle, crédit plus léger. Probabilité attendue "
@@ -52,10 +52,10 @@ class PredictionRequest(BaseModel):
 
     features: dict[str, FeatureValue] = Field(
         description=(
-            "Features du dossier, sous la forme nom → valeur. Les noms doivent "
+            "Features du dossier, sous la forme nom vers valeur. Les noms doivent "
             "appartenir au contrat du modèle (voir GET /features) ; un nom inconnu "
             "est rejeté. Les features non transmises sont traitées comme manquantes, "
-            "ce que le modèle gère nativement — mais le dossier de demande doit être "
+            "ce que le modèle gère nativement : mais le dossier de demande doit être "
             "suffisamment renseigné (voir GET /model/info)."
         ),
     )
@@ -146,7 +146,7 @@ class PredictionLogStatus(BaseModel):
             "État du stockage PostgreSQL. `disabled` : aucune base configurée "
             "(`DATABASE_URL` absent), ce qui est un mode de fonctionnement normal. "
             "`unavailable` : une base est configurée mais la dernière écriture a "
-            "échoué — les prédictions restent servies et tracées sur la sortie "
+            "échoué : les prédictions restent servies et tracées sur la sortie "
             "standard, seul le monitoring est dégradé."
         ),
     )

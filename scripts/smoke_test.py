@@ -49,7 +49,7 @@ def wait_until_ready(base_url: str) -> None:
             status, body = call(base_url, "/health")
             if status == 200 and body.get("model_loaded"):
                 version = body["model_version"]
-                print(f"  service prêt après {attempt} tentative(s) — modèle v{version}")
+                print(f"  service prêt après {attempt} tentative(s) : modèle v{version}")
                 return
             print(f"  tentative {attempt}/{STARTUP_ATTEMPTS} : statut {status}")
         except (urllib.error.URLError, ConnectionError, TimeoutError) as exc:

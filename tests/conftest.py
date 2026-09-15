@@ -54,7 +54,7 @@ def real_clients(model):
 
     p6_root = os.environ.get("P6_PROJECT_ROOT")
     if not p6_root or not (Path(p6_root) / "output" / "feature_dataset.parquet").exists():
-        pytest.skip("données de la Partie 1 absentes (P6_PROJECT_ROOT) — test ignoré")
+        pytest.skip("données de la Partie 1 absentes (P6_PROJECT_ROOT) : test ignoré")
     X = load_verification_sample(Path(p6_root), model.feature_names).head(25)
     return [
         {k: (None if pd.isna(v) else float(v)) for k, v in row.items()}

@@ -1,4 +1,4 @@
-"""Étape 3 — comparaison LightGBM (GBDT et GOSS) + XGBoost en 5-fold.
+"""Étape 3 : comparaison LightGBM (GBDT et GOSS) + XGBoost en 5-fold.
 
 Hyperparamètres LightGBM repris du kernel jsaguiar (bayésiens). XGBoost adapté
 avec des valeurs équivalentes. Early stopping sur l'AUC du fold de validation.

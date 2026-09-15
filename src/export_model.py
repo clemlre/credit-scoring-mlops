@@ -168,7 +168,7 @@ def main() -> None:
         f"  répartition sur l'échantillon : {accepted} accordés / "
         f"{len(sample) - accepted} refusés"
     )
-    print("\nOK — artefact déployable vérifié.")
+    print("\nOK : artefact déployable vérifié.")
 
 
 if __name__ == "__main__":

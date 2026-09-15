@@ -9,7 +9,7 @@ des fichiers de `docs/perf/`, produits par les scripts listés en fin de documen
 Image d'origine contre image optimisée, dans les conditions du Space Hugging Face
 « cpu-basic » : conteneur Linux limité à 2 CPU. Médiane de 3 tours alternés.
 
-**Sous charge** — test oha sur `/predict`, 15 s par mesure (`docs/perf/charge.json`) :
+**Sous charge** : test oha sur `/predict`, 15 s par mesure (`docs/perf/charge.json`) :
 
 | | Avant | Après | Écart |
 |---|---:|---:|---:|
@@ -19,7 +19,7 @@ Image d'origine contre image optimisée, dans les conditions du Space Hugging Fa
 | Latence p95, 32 connexions | 309,8 ms | 136,6 ms | −56 % |
 | Latence p99, 32 connexions | 362,6 ms | 164,9 ms | −55 % |
 
-**Requête seule** — 1 000 requêtes séquentielles (`docs/perf/comparaison-finale.json`) :
+**Requête seule** : 1 000 requêtes séquentielles (`docs/perf/comparaison-finale.json`) :
 
 | | Avant | Après | Écart |
 |---|---:|---:|---:|
@@ -39,16 +39,16 @@ sur 20 dossiers comparés : le modèle et son format n'ont pas changé.
 
 ## Méthode
 
-- **Conditions** : l'image de production, lancée avec `--cpus=2 --memory=4g`, sans base de
+- Conditions : l'image de production, lancée avec `--cpus=2 --memory=4g`, sans base de
   données (comme sur le Space). Dossier envoyé : l'exemple « refusé » de Swagger, 245
   features.
-- **Alternance** : les conteneurs sont mesurés tour à tour, trois fois, et on retient la
+- Alternance : les conteneurs sont mesurés tour à tour, trois fois, et on retient la
   médiane. Sur un portable, deux mesures successives du même conteneur varient facilement de
   20 % : mesurer « avant » un jour et « après » le lendemain ne prouverait rien.
-- **Charge** : oha tourne dans un conteneur qui partage l'espace réseau de la cible. Un
+- Charge : oha tourne dans un conteneur qui partage l'espace réseau de la cible. Un
   premier générateur en Python, sous Windows, donnait des débits trop instables (de 218 à
   367 req/s pour le même conteneur) pour attribuer un gain à un changement précis.
-- **Instrument** : le temps serveur est lu dans les journaux JSON du conteneur. C'est le
+- Instrument : le temps serveur est lu dans les journaux JSON du conteneur. C'est le
   dispositif de monitoring de l'étape 3 qui sert ici de mesure.
 
 Les mesures d'étapes en processus (`scripts/benchmark.py etapes`) sont faites sous Windows,
@@ -84,14 +84,14 @@ boucle d'événements d'uvicorn. On y voyait le coût de `BaseHTTPMiddleware` et
 passages par `run_in_threadpool` à chaque requête : la dépendance `get_model`, la route, la
 sérialisation de la réponse et deux tâches de journalisation.
 
-## Goulot 1 — le contrôle des plages de valeurs
+## Goulot 1 : le contrôle des plages de valeurs
 
-Chaque valeur reçue était comparée aux cinq préfixes des règles (`EXT_SOURCE_`, `DAYS_`…).
+Chaque valeur reçue était comparée aux cinq préfixes des règles (`EXT_SOURCE_`, `DAYS_`...).
 Les bornes de chaque feature sont désormais résolues une fois, au chargement du modèle ; le
 contrôle devient une recherche dans un dictionnaire. La couverture calculée pendant la
 validation est transmise à `predict` au lieu d'être recalculée.
 
-| En processus (`avant-etapes.json` → `apres-etapes.json`) | Avant | Après |
+| En processus (`avant-etapes.json` vers `apres-etapes.json`) | Avant | Après |
 |---|---:|---:|
 | Contrôle du contrat, p50 | 0,34 ms | 0,06 ms |
 | Route hors HTTP, p50 | 1,60 ms | 0,62 ms |
@@ -99,7 +99,7 @@ validation est transmise à `predict` au lieu d'être recalculée.
 Le nombre d'appels de fonctions mesuré par cProfile sur 2 000 requêtes passe de 3,66 à 1,68
 million.
 
-## Goulot 2 — la pile HTTP
+## Goulot 2 : la pile HTTP
 
 - Le middleware `@app.middleware("http")` est un `BaseHTTPMiddleware`, qui crée un groupe de
   tâches et des flux mémoire à chaque requête. Il est remplacé par un middleware ASGI pur,
@@ -112,9 +112,9 @@ million.
   moins.
 
 Effet, code seul et un worker (`docs/perf/comparaison-code.json`) : temps serveur p50
-2,51 → 2,10 ms, p99 9,5 → 5,6 ms.
+2,51 vers 2,10 ms, p99 9,5 vers 5,6 ms.
 
-## Goulot 3 — les threads OpenMP dans un conteneur
+## Goulot 3 : les threads OpenMP dans un conteneur
 
 Ce goulot ne se voyait pas dans les profils Python.
 
@@ -156,9 +156,9 @@ d'environ 75 à 180 Mo, négligeable face aux 16 Go du Space.
 
 Avec deux workers et un thread OpenMP chacun, le service utilise exactement ses 2 vCPU,
 sans sursouscription. L'effet des workers seuls n'est pas isolé proprement : la seule série
-qui le mesure (`comparaison-workers.json`, 320 → 364 req/s) a été faite avec le générateur
+qui le mesure (`comparaison-workers.json`, 320 vers 364 req/s) a été faite avec le générateur
 Python, trop instable. Le gain combiné du code et des workers se lit dans `charge.json` :
-187 → 337 req/s à 8 connexions, avant même le réglage d'OpenMP.
+187 vers 337 req/s à 8 connexions, avant même le réglage d'OpenMP.
 
 ## ONNX Runtime : testé, non retenu
 
@@ -203,6 +203,46 @@ sont arrondis, et une valeur très proche d'un seuil peut basculer dans l'autre 
 **Quand y revenir** : si le modèle devenait nettement plus lourd (plus d'arbres, plus
 profonds), au point que l'inférence redevienne une part significative de la requête. Il
 faudrait alors faire valider l'écart de score par le métier avant la mise en production.
+
+## Effet des optimisations sur les métriques du modèle
+
+Une optimisation de latence ne vaut rien si elle change les décisions. Les métriques
+ci-dessous sont **out-of-fold** : `scripts/evaluer_modele.py` rejoue le protocole de la
+Partie 1 (3 plis stratifiés, graine 42, 867 arbres) sur les 307 507 clients étiquetés,
+convertit chaque modèle de pli en ONNX et évalue les deux moteurs sur les mêmes dossiers
+(`docs/perf/metriques-modele.json`). Le rejeu retrouve les chiffres publiés par la
+Partie 1 : AUC 0,7888 (0,7889 annoncé), coût métier 150 981 (150 877 annoncé, écart de
+0,07 % dû au parallélisme de LightGBM à l'entraînement).
+
+| Seuil 0,10, 307 507 clients | LightGBM | ONNX Runtime | Écart |
+|---|---:|---:|---:|
+| AUC | 0,7888 | 0,7888 | +8 × 10⁻⁷ |
+| Accuracy | 78,26 % | 78,26 % | 0 |
+| Précision | 21,21 % | 21,21 % | 0 |
+| Rappel | 62,34 % | 62,34 % | 0 |
+| F1 | 0,3165 | 0,3165 | 0 |
+| Coût métier (10 × FN + FP) | 150 981 | 150 982 | +1 |
+| Décisions différentes | | | 1 |
+
+Les probabilités ONNX s'écartent de 7,7 × 10⁻³ au pire (689 dossiers au-delà de 10⁻⁴),
+mais **une seule décision change sur 307 507** : un client accepté par LightGBM est refusé
+par ONNX. Sur les métriques, ONNX est neutre à 10⁻⁶ près. La raison de ne pas le déployer
+reste celle du paragraphe précédent : un gain de latence que personne ne perçoit, contre
+des scores qui ne sont plus ceux du modèle validé.
+
+**Les optimisations guidées par cProfile** (bornes pré-calculées, couverture calculée une
+fois, middleware ASGI, un thread OpenMP) ne touchent pas au modèle : le profileur observe
+sans rien modifier, et les corrections portent sur le code autour de l'appel `predict`.
+La preuve : 20 000 dossiers réels passés par `ScoringModel.predict`, le chemin de l'API,
+donnent des probabilités **identiques au bit près** à celles du booster brut (bloc
+`chemin_api` de `metriques-modele.json` : écart maximal 0,0, aucune décision changée).
+Les métriques ci-dessus sont donc celles de l'API en production, avant comme après
+l'étape 4 ; l'étape 4 a divisé le temps de requête par deux sans déplacer une seule
+décision.
+
+Au seuil naïf de 0,50, pour mémoire : accuracy 92,03 % mais rappel 5,24 %, le modèle
+laisserait passer 95 % des défauts. C'est ce que le seuil métier corrige, au prix d'une
+accuracy plus basse (voir [`modele-partie1.md`](modele-partie1.md)).
 
 ## Quantification
 
@@ -274,6 +314,11 @@ uv run python scripts/tester_charge.py bench-avant bench-final --connexions 8 32
 # ONNX (fidélité : nécessite les données de la Partie 1)
 uv sync --group perf
 uv run --group perf python scripts/evaluer_onnx.py --lignes 100000 --sortie docs/perf/onnx.json
+
+# Métriques out-of-fold de LightGBM et d'ONNX, chemin de l'API (données de la Partie 1,
+# environ 5 minutes) ; --mettre-a-jour-metadata les publie dans GET /model/info
+P6_PROJECT_ROOT=... uv run --group training --group perf python scripts/evaluer_modele.py \
+  --sortie docs/perf/metriques-modele.json --mettre-a-jour-metadata
 ```
 
 Un fichier `.prof` s'ouvre avec `python -m pstats route.prof`, ou avec snakeviz.
