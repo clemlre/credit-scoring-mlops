@@ -225,12 +225,17 @@ def verifier_chemin_api(X, lignes: int) -> dict:
 def mettre_a_jour_metadata(metier: dict, naif: dict, chemin: Path = METADATA) -> None:
     """Ajoute les métriques OOF à la carte d'identité servie par /model/info.
 
-    Au seuil métier, toutes ; au seuil naïf 0,5, l'accuracy et le rappel, qui suffisent à
-    montrer pourquoi l'accuracy seule ne dit rien sur ce problème.
+    La même exécution fournit l'AUC, les coûts métier et les métriques de classification :
+    ils doivent être mis à jour ensemble pour éviter de servir un mélange de rejeux.
+    Au seuil naïf 0,5, l'accuracy et le rappel suffisent à montrer pourquoi l'accuracy
+    seule ne dit rien sur ce problème.
     """
     document = json.loads(chemin.read_text(encoding="utf-8"))
     document["metrics"].update(
         {
+            "auc_oof": metier["auc"],
+            "business_cost_optimal_threshold": metier["cout_metier"],
+            "business_cost_threshold_0.5": naif["cout_metier"],
             "accuracy_oof": metier["accuracy"],
             "precision_oof": metier["precision"],
             "recall_oof": metier["rappel"],

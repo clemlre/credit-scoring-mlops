@@ -82,7 +82,9 @@ class TestMiseAJourDesMetadonnees:
         em.mettre_a_jour_metadata(metier, naif, chemin)
         document = json.loads(chemin.read_text(encoding="utf-8"))
         assert document["model_version"] == "1"
-        assert document["metrics"]["auc_oof"] == 0.7889
+        assert document["metrics"]["auc_oof"] == pytest.approx(15 / 21)
+        assert document["metrics"]["business_cost_optimal_threshold"] == 13
+        assert document["metrics"]["business_cost_threshold_0.5"] == 21
         assert document["metrics"]["recall_oof"] == pytest.approx(2 / 3)
         assert document["metrics"]["rejection_rate_oof"] == pytest.approx(0.5)
         assert document["metrics"]["recall_oof_threshold_0.5"] == pytest.approx(1 / 3)

@@ -8,9 +8,9 @@
   "n_features": 779,
   "n_trees": 867,
   "metrics": {
-    "auc_oof": 0.7888684848958594,
-    "business_cost_optimal_threshold": 150877.0,
-    "business_cost_threshold_0.5": 236407.0,
+    "auc_oof": 0.7887979273882659,
+    "business_cost_optimal_threshold": 150981,
+    "business_cost_threshold_0.5": 236227,
     "optimal_threshold": 0.1,
     "optuna_best_cv_cost": 8565.666666666666,
     "accuracy_oof": 0.7826390943945991,

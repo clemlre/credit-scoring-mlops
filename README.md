@@ -210,9 +210,11 @@ uv run pytest                                   # suite complète
 uv run pytest --cov --cov-report=term-missing   # avec couverture
 ```
 
-146 tests, **100 % de couverture** sur `api/` et `monitoring/indicateurs.py` (plancher
-CI : 95 %). Aucune donnée client n'est versionnée : les dossiers de test sont générés de
-façon déterministe. Deux familles de tests ne tournent que si leur ressource existe :
+Audit local du 16 septembre 2026 : **163 tests passés, 9 ignorés, couverture globale
+99,35 %** (plancher CI : 95 %). Ce résultat inclut `api/` et le package `monitoring`,
+hors interface Streamlit et script ponctuel exclus de la mesure dans `pyproject.toml`.
+Aucune donnée client n'est versionnée : les dossiers de test sont générés de façon
+déterministe. Deux familles de tests ne tournent que si leur ressource existe :
 
 - les tests d'intégration PostgreSQL, si `DATABASE_URL` est défini (c'est le cas en CI) ;
 - les tests de fidélité sur de vrais clients, si `P6_PROJECT_ROOT` désigne le projet de
